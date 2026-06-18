@@ -10,95 +10,85 @@ interface SpeakerCardProps {
 
 export default function SpeakerCard({ speaker }: SpeakerCardProps) {
   const initials = speaker.full_name
-    ? speaker.full_name
-        .split(/[,\s]+/)
-        .filter(Boolean)
-        .map((p) => p[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase()
+    ? speaker.full_name.split(/[,\s]+/).filter(Boolean).map(p => p[0]).join("").slice(0, 2).toUpperCase()
     : "?"
 
   const firstSeminar = speaker.seminars?.[0]
-  const category = firstSeminar?.categories
-  const department = firstSeminar?.departments?.name
-  const status = firstSeminar?.statuses?.label ?? "Active"
-  const isActive = status.toLowerCase() === "active" || status.toLowerCase() === ""
+  const category     = firstSeminar?.categories
+  const department   = firstSeminar?.departments?.name
+  const isActive     = speaker.is_active ?? true
+
+  // Get all unique categories from all seminars
+  const allCategories = speaker.seminars
+    ?.map(s => s.categories)
+    .filter((c): c is { name: string; color_hex: string } => !!c)
+    .filter((c, i, arr) => arr.findIndex(x => x.name === c.name) === i)
+    .slice(0, 2) ?? []
 
   return (
     <Link href={`/speakers/${speaker.speaker_id}`} className="block group">
-      <article
-        className="
-          relative overflow-hidden rounded-[24px]
-          border border-white/70 bg-white/80 backdrop-blur-xl
-          shadow-[0_6px_22px_rgba(15,23,42,0.05)]
-          transition-all duration-300
-          hover:-translate-y-0.5 hover:bg-white/90
-          hover:shadow-[0_14px_34px_rgba(15,23,42,0.09)]
-        "
-      >
-        <div className="absolute inset-x-0 top-0 h-16 bg-gradient-to-br from-teal-100/70 via-blue-100/60 to-transparent" />
+      <div className="relative bg-white rounded-2xl border border-gray-100 shadow-sm hover:shadow-md transition-all duration-200 group-hover:-translate-y-0.5 overflow-hidden p-5">
 
-        <div className="relative flex min-h-[185px] flex-col items-center justify-center px-4 py-5 text-center">
-          <div className="relative mb-3">
+        {/* Status dot */}
+        <div className="absolute top-3.5 right-3.5">
+          <span className={`w-2.5 h-2.5 rounded-full block ${isActive ? "bg-emerald-400" : "bg-yellow-400"}`} />
+        </div>
+
+        {/* Avatar */}
+        <div className="flex flex-col items-center text-center gap-3">
+          <div className="relative">
             {speaker.headshot_url ? (
               <Image
                 src={speaker.headshot_url}
                 alt={speaker.full_name ?? "Speaker"}
-                width={72}
-                height={72}
-                className="h-[72px] w-[72px] rounded-full object-cover ring-[3px] ring-white shadow-sm"
+                width={80}
+                height={80}
+                className="rounded-full object-cover ring-2 ring-gray-100"
+                style={{ width: 80, height: 80 }}
               />
             ) : (
               <div
-                className="
-                  flex h-[72px] w-[72px] items-center justify-center rounded-full
-                  bg-gradient-to-br from-teal-100 to-blue-100
-                  text-lg font-bold text-teal-700
-                  ring-[3px] ring-white shadow-sm
-                "
+                className="rounded-full flex items-center justify-center text-xl font-bold text-gray-500 bg-gray-100 ring-2 ring-gray-100"
+                style={{ width: 80, height: 80 }}
               >
                 {initials}
               </div>
             )}
-
-            <span
-              className={`absolute bottom-1 right-1 h-3.5 w-3.5 rounded-full border-[2.5px] border-white ${
-                isActive ? "bg-emerald-400" : "bg-gray-300"
-              }`}
-            />
           </div>
 
-          <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-gray-800">
-            {speaker.full_name}
-          </h3>
+          {/* Name */}
+          <div>
+            <h3 className="font-semibold text-gray-900 text-sm leading-snug line-clamp-2">
+              {speaker.full_name}
+            </h3>
+            {speaker.credentials && (
+              <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{speaker.credentials}</p>
+            )}
+            {department && (
+              <p className="text-xs text-gray-400 mt-0.5 line-clamp-1">{department}</p>
+            )}
+          </div>
 
-          {speaker.credentials && (
-            <p className="mt-0.5 line-clamp-1 text-xs font-medium text-gray-400">
-              {speaker.credentials}
-            </p>
-          )}
-
-          {department && (
-            <p className="mt-0.5 line-clamp-1 text-xs text-gray-400">
-              {department}
-            </p>
-          )}
-
-          {category && (
-            <span
-              className="mt-3 rounded-full px-2.5 py-1 text-[11px] font-semibold"
-              style={{
-                backgroundColor: `${category.color_hex}18`,
-                color: category.color_hex,
-                border: `1px solid ${category.color_hex}30`,
-              }}
-            >
-              {category.name}
-            </span>
+          {/* Category badges */}
+          {allCategories.length > 0 && (
+            <div className="flex flex-wrap justify-center gap-1.5">
+              {allCategories.map(cat => (
+                <span
+                  key={cat.name}
+                  className="text-xs px-2.5 py-1 rounded-full font-medium"
+                  style={{
+                    backgroundColor: cat.color_hex + "18",
+                    color: cat.color_hex,
+                    border: `1px solid ${cat.color_hex}30`,
+                  }}
+                >
+                  {cat.name}
+                </span>
+              ))}
+            </div>
           )}
         </div>
-      </article>
+      </div>
     </Link>
   )
 }

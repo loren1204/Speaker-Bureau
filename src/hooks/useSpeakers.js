@@ -23,7 +23,7 @@ export function useSpeakers(filters = {}) {
             topics ( title )
           )
         `)
-        .order('last_name', { ascending: true })
+        .order('full_name', { ascending: true })
 
       if (filters.is_active !== undefined)
         query = query.eq('is_active', filters.is_active)
