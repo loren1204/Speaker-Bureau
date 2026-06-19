@@ -148,21 +148,23 @@ export default function SpeakersPage() {
           {/* Logo */}
           <Link href="/" className="flex items-center shrink-0">
 <Image src="/speaker_logo.png" alt="Lee Health Speakers Bureau" width={160} height={44} className="object-contain" style={{ width: 'auto', height: '44px' }} unoptimized />          </Link>
-
-          {/* Nav links */}
-          <div className="hidden md:flex items-center gap-8">
-            {["Speakers","About Us", "For Partners"].map((item) => (
-              <Link key={item} href="#"
-                className={`text-sm font-medium pb-0.5 transition-colors ${
-                  item === "Speakers"
-                    ? "text-green-600 border-b-2 border-green-500"
-                    : "text-gray-600 hover:text-gray-900"
-                }`}>
-                {item}
-              </Link>
-            ))}
-          </div>
-
+{/* Nav links */}
+<div className="hidden md:flex items-center gap-8">
+  {[
+    { label: "Speakers", href: "/speakers" },
+    { label: "About Us", href: "/about" },
+    { label: "For Partners", href: "/partners" },
+  ].map((item) => (
+    <Link key={item.label} href={item.href}
+      className={`text-sm font-medium pb-0.5 transition-colors ${
+        item.label === "Speakers"
+          ? "text-green-600 border-b-2 border-green-500"
+          : "text-gray-600 hover:text-gray-900"
+      }`}>
+      {item.label}
+    </Link>
+  ))}
+</div>
  {/* Actions */}
 <div className="flex items-center gap-5">
   <button className="text-sm font-medium text-gray-600 transition-colors hover:text-gray-900">
