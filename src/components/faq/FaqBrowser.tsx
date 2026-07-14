@@ -1,7 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import type { FaqItem } from "@/data/faq"
+
+export interface FaqItem {
+  id: string
+  topic: string
+  question: string
+  answer: string
+}
 
 export function FaqBrowser({ items }: { items: FaqItem[] }) {
   const [selectedId, setSelectedId] = useState(items[0]?.id ?? "")
@@ -9,11 +15,13 @@ export function FaqBrowser({ items }: { items: FaqItem[] }) {
   const topics = useMemo(() => Array.from(new Set(items.map((item) => item.topic))), [items])
 
   useEffect(() => {
-    const hash = window.location.hash.slice(1)
-    if (items.some((item) => item.id === hash)) setSelectedId(hash)
     const onHash = () => { const next = window.location.hash.slice(1); if (items.some((item) => item.id === next)) setSelectedId(next) }
+    const frame = window.requestAnimationFrame(onHash)
     window.addEventListener("hashchange", onHash)
-    return () => window.removeEventListener("hashchange", onHash)
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener("hashchange", onHash)
+    }
   }, [items])
 
   function select(id: string) { setSelectedId(id); window.history.replaceState(null, "", `#${id}`) }
@@ -32,4 +40,3 @@ export function FaqBrowser({ items }: { items: FaqItem[] }) {
     </div>
   )
 }
-
