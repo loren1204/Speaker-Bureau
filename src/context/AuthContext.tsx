@@ -1,23 +1,20 @@
 "use client"
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react"
+import type { AuthError, User } from "@supabase/supabase-js"
 import { supabase } from "../supabaseClient"
+import type { TeamProfile } from "@/types/database"
 
-type Profile = {
-  id: string
-  full_name: string | null
-  role: "guest" | "stakeholder"
-  created_at: string
-}
+type AuthOperationResult = { error: AuthError | null }
 
 type AuthContextValue = {
-  user: any | null
-  profile: Profile | null
+  user: User | null
+  profile: TeamProfile | null
   loading: boolean
   isStakeholder: boolean
-  signIn: (email: string, password: string) => Promise<any>
-  signOut: () => Promise<any>
-  resetPassword: (email: string) => Promise<any>
+  signIn: (email: string, password: string) => Promise<AuthOperationResult>
+  signOut: () => Promise<AuthOperationResult>
+  resetPassword: (email: string) => Promise<AuthOperationResult>
 }
 
 const AuthContext = createContext<AuthContextValue>({
@@ -25,56 +22,82 @@ const AuthContext = createContext<AuthContextValue>({
   profile: null,
   loading: true,
   isStakeholder: false,
-  signIn: async () => {},
-  signOut: async () => {},
-  resetPassword: async () => {},
+  signIn: async () => ({ error: null }),
+  signOut: async () => ({ error: null }),
+  resetPassword: async () => ({ error: null }),
 })
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<any | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<TeamProfile | null>(null)
   const [loading, setLoading] = useState(true)
 
+  const fetchProfile = useCallback(async (currentUser: User) => {
+    const { data } = await supabase.from("profiles").select("*").eq("id", currentUser.id).maybeSingle()
+    const raw = data as Partial<TeamProfile> | null
+    setProfile(raw ? {
+      id: currentUser.id,
+      full_name: raw.full_name ?? currentUser.user_metadata?.full_name ?? null,
+      email: raw.email ?? currentUser.email ?? null,
+      role: raw.role === "stakeholder" ? "stakeholder" : "guest",
+      title: raw.title ?? null,
+      avatar_url: raw.avatar_url ?? currentUser.user_metadata?.avatar_url ?? null,
+      notifications_enabled: raw.notifications_enabled ?? true,
+      created_at: raw.created_at ?? currentUser.created_at,
+      updated_at: raw.updated_at ?? null,
+    } : null)
+  }, [])
+
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
-      else setLoading(false)
-    })
+    let active = true
+    async function resolveSession() {
+      const { data: { user: resolvedUser } } = await supabase.auth.getUser()
+      if (!active) return
+      setUser(resolvedUser)
+      if (resolvedUser) await fetchProfile(resolvedUser)
+      if (active) setLoading(false)
+    }
+    void resolveSession()
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-      if (session?.user) fetchProfile(session.user.id)
+      const nextUser = session?.user ?? null
+      setUser(nextUser)
+      if (nextUser) {
+        setLoading(true)
+        window.setTimeout(() => {
+          void fetchProfile(nextUser).finally(() => active && setLoading(false))
+        }, 0)
+      }
       else {
         setProfile(null)
         setLoading(false)
       }
     })
-    return () => subscription.unsubscribe()
-  }, [])
-
-  async function fetchProfile(userId: string) {
-    const { data } = await supabase.from("profiles").select("*").eq("id", userId).single()
-    setProfile(data)
-    setLoading(false)
-  }
+    return () => {
+      active = false
+      subscription.unsubscribe()
+    }
+  }, [fetchProfile])
 
   const isStakeholder = profile?.role === "stakeholder"
 
   async function signIn(email: string, password: string) {
-    return supabase.auth.signInWithPassword({ email, password })
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    return { error }
   }
 
   async function signOut() {
-    return supabase.auth.signOut()
+    const { error } = await supabase.auth.signOut()
+    return { error }
   }
 
   async function resetPassword(email: string) {
-    return supabase.auth.resetPasswordForEmail(email, {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     })
+    return { error }
   }
 
   return (

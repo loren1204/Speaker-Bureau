@@ -15,6 +15,10 @@
 
 # next.js
 /.next/
+/.next-build/
+/.next-codex/
+/.next-verify/
+/.next-webpack/
 /out/
 
 # production

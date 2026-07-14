@@ -1,19 +1,23 @@
 export interface Seminar {
   seminar_id: number
+  speaker_id?: number | null
+  department_id?: number | null
+  category_id?: number | null
+  status_id?: number | null
   title: string
   description?: string | null
   scheduled_at?: string | null
   categories?: {
-    name: string
-    color_hex: string
-  }
+    name: string | null
+    color_hex?: string | null
+  } | null
   departments?: {
-    name: string
-  }
+    name: string | null
+  } | null
   statuses?: {
-    label: string
-    color_hex: string
-  }
+    label: string | null
+    color_hex?: string | null
+  } | null
 }
 
 export interface Speaker {
@@ -28,7 +32,8 @@ export interface Speaker {
   state?: string | null
   is_active: boolean
   created_at?: string
+  updated_at?: string | null
   seminars?: Seminar[]
-  speaker_topics?: { topics: { title: string } }[]
-  speaker_contacts?: { contact_id: number; contact: string }[]
+  speaker_topics?: { topics: { title: string } | null }[]
+  speaker_contacts?: { contact_id: number; contact: string | null }[]
 }

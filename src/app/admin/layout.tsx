@@ -1,92 +1,38 @@
-"use client"
+import { redirect } from "next/navigation"
+import { createClient } from "@/lib/supabase/server"
+import { PortalShell } from "@/components/portal/PortalShell"
+import type { TeamProfile } from "@/types/database"
 
-import { useEffect } from "react"
-import { useRouter, usePathname } from "next/navigation"
-import Link from "next/link"
-import Image from "next/image"
-import { useAuth } from "@/context/AuthContext"
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) redirect("/login?next=/admin")
 
-const navItems = [
-  { label: "Manage Speaker Data", href: "/admin/speakers" },
-  { label: "Handoff & FAQ Guide", href: "/admin/faq" },
-]
-
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, loading, isStakeholder, signOut } = useAuth()
-  const router = useRouter()
-  const pathname = usePathname()
-
-  useEffect(() => {
-    if (!loading && !user) router.replace("/login")
-  }, [loading, user, router])
-
-  if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[linear-gradient(160deg,#f0fdf8_0%,#eff6ff_50%,#f8faff_100%)]">
-        <p className="text-sm text-slate-500">Loading…</p>
-      </div>
-    )
+  const { data } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle()
+  const raw = data as Partial<TeamProfile> | null
+  const profile: TeamProfile = {
+    id: user.id,
+    full_name: raw?.full_name ?? user.user_metadata?.full_name ?? null,
+    email: raw?.email ?? user.email ?? null,
+    role: raw?.role === "stakeholder" ? "stakeholder" : "guest",
+    title: raw?.title ?? null,
+    avatar_url: raw?.avatar_url ?? user.user_metadata?.avatar_url ?? null,
+    notifications_enabled: raw?.notifications_enabled ?? true,
+    created_at: raw?.created_at ?? user.created_at,
+    updated_at: raw?.updated_at ?? null,
   }
-  if (!user) return null
 
-  if (!isStakeholder) {
+  if (profile.role !== "stakeholder") {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[linear-gradient(160deg,#f0fdf8_0%,#eff6ff_50%,#f8faff_100%)] px-6">
-        <div className="max-w-md rounded-[24px] border border-white/80 bg-white/72 p-8 text-center shadow-[0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur-2xl">
-          <h1 className="text-xl font-black text-slate-900">Access restricted</h1>
-          <p className="mt-2 text-sm text-slate-500">
-            Your account doesn't have stakeholder permissions yet. Contact an admin to be upgraded.
-          </p>
-        </div>
-      </div>
+      <main className="grid min-h-screen place-items-center bg-[var(--canvas-subtle)] px-6">
+        <section className="w-full max-w-lg rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-white p-8 text-center shadow-[var(--shadow-md)]">
+          <p className="text-sm font-semibold uppercase tracking-[0.14em] text-[var(--green-600)]">Team portal</p>
+          <h1 className="mt-3 text-2xl font-bold text-[var(--navy-950)]">Access has not been granted</h1>
+          <p className="mt-3 text-[var(--text-muted)]">You are signed in, but this account is not assigned the stakeholder role. Ask a team administrator to update your profile.</p>
+        </section>
+      </main>
     )
   }
 
-  return (
-    <div className="flex min-h-screen bg-[linear-gradient(160deg,#f8fcff_0%,#eff7ff_38%,#f2fbf7_68%,#fbfdff_100%)]">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-white/70 bg-white/70 p-6 backdrop-blur-2xl">
-        <Link href="/speakers" className="mb-8 block">
-          <Image src="/speaker_logo.png" alt="Lee Health" width={160} height={44} className="h-9 w-auto object-contain" unoptimized />
-        </Link>
-
-        <p className="mb-3 px-2 text-xs font-black uppercase tracking-widest text-slate-400">Admin</p>
-
-        <nav className="flex-1 space-y-1.5">
-          {navItems.map((item) => {
-            const active = pathname === item.href
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`block rounded-2xl px-4 py-3 text-sm font-bold transition-all ${
-                  active
-                    ? "bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-[0_10px_24px_rgba(16,185,129,0.28)]"
-                    : "text-slate-600 hover:bg-white hover:text-slate-900"
-                }`}
-              >
-                {item.label}
-              </Link>
-            )
-          })}
-        </nav>
-
-        <div className="mt-6 space-y-1.5 border-t border-slate-200/60 pt-4">
-          <Link
-            href="/speakers"
-            className="block rounded-2xl px-4 py-3 text-sm font-bold text-slate-600 transition hover:bg-white hover:text-slate-900"
-          >
-            ← Back to public site
-          </Link>
-          <button
-            onClick={() => signOut()}
-            className="block w-full rounded-2xl px-4 py-3 text-left text-sm font-bold text-rose-600 transition hover:bg-rose-50"
-          >
-            Sign Out
-          </button>
-        </div>
-      </aside>
-
-      <main className="flex-1 overflow-y-auto p-8 lg:p-10">{children}</main>
-    </div>
-  )
+  return <PortalShell profile={profile}>{children}</PortalShell>
 }

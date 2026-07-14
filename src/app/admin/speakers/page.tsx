@@ -1,890 +1,159 @@
 "use client"
 
-import { categories } from "@/data/speakers"
-import type { Speaker } from "@/models/Speaker"
-import { useSpeakers } from "@/hooks/useSpeakers"
-import { useAuth } from "@/context/AuthContext"
-import Image from "next/image"
-import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState, type CSSProperties } from "react"
-import { AnimatePresence, motion } from "framer-motion"
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { Plus, Search, X } from "lucide-react"
+import type { Seminar, Speaker } from "@/models/Speaker"
+import { getCategoryName, getDepartmentName, getSeminarTitles, getSpeakerDescription, getStatusName, normalizeSpeakerRecords } from "@/lib/speakerPresentation"
+import { SpeakerCard, SpeakerCardSkeleton } from "@/components/design-system/SpeakerCard"
+import { SectionHeader } from "@/components/portal/SectionHeader"
+import { EmptyState } from "@/components/portal/EmptyState"
+import { ExcelTools } from "@/components/portal/ExcelTools"
 
-const INITIAL_VISIBLE_COUNT = 12
+type Lookup = { categories: { category_id: number; name: string }[]; departments: { department_id: number; name: string }[]; statuses: { status_id: number; label: string }[] }
+const emptyLookup: Lookup = { categories: [], departments: [], statuses: [] }
 
-const categoryConfig: Record<string, { badge: string; dot: string; glow: string; tint: string }> = {
-  Nutrition: {
-    badge: "bg-emerald-100/80 text-emerald-700 border-emerald-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(16,185,129,0.20)",
-    tint: "from-emerald-50/80 to-white/70",
-  },
-  Surgery: {
-    badge: "bg-blue-100/80 text-blue-700 border-blue-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(59,130,246,0.18)",
-    tint: "from-blue-50/80 to-white/70",
-  },
-  Pharmacy: {
-    badge: "bg-violet-100/80 text-violet-700 border-violet-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(139,92,246,0.18)",
-    tint: "from-violet-50/80 to-white/70",
-  },
-  Cancer: {
-    badge: "bg-rose-100/80 text-rose-700 border-rose-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(244,63,94,0.16)",
-    tint: "from-rose-50/80 to-white/70",
-  },
-  "Integrative/Lifestyle": {
-    badge: "bg-cyan-100/80 text-cyan-700 border-cyan-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(6,182,212,0.18)",
-    tint: "from-cyan-50/80 to-white/70",
-  },
-  Vascular: {
-    badge: "bg-sky-100/80 text-sky-700 border-sky-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(14,165,233,0.18)",
-    tint: "from-sky-50/80 to-white/70",
-  },
-  Cardiac: {
-    badge: "bg-rose-100/80 text-rose-700 border-rose-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(244,63,94,0.16)",
-    tint: "from-rose-50/80 to-white/70",
-  },
-  Orthopedics: {
-    badge: "bg-orange-100/80 text-orange-700 border-orange-200/70",
-    dot: "bg-amber-400",
-    glow: "rgba(249,115,22,0.18)",
-    tint: "from-orange-50/80 to-white/70",
-  },
-  "Orthopedics and PT": {
-    badge: "bg-orange-100/80 text-orange-700 border-orange-200/70",
-    dot: "bg-amber-400",
-    glow: "rgba(249,115,22,0.18)",
-    tint: "from-orange-50/80 to-white/70",
-  },
-  Pediatrics: {
-    badge: "bg-pink-100/80 text-pink-700 border-pink-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(236,72,153,0.18)",
-    tint: "from-pink-50/80 to-white/70",
-  },
-  "Mental Health": {
-    badge: "bg-indigo-100/80 text-indigo-700 border-indigo-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(99,102,241,0.18)",
-    tint: "from-indigo-50/80 to-white/70",
-  },
-  Specialists: {
-    badge: "bg-cyan-100/80 text-cyan-700 border-cyan-200/70",
-    dot: "bg-emerald-500",
-    glow: "rgba(20,184,166,0.16)",
-    tint: "from-cyan-50/80 to-white/70",
-  },
-}
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-sm font-semibold text-[var(--navy-950)]">{label}{children}</label> }
+const fieldClass = "mt-2 h-11 w-full rounded-[var(--radius-input)] border border-[var(--border)] bg-white px-3 outline-none focus:border-[var(--blue-600)] focus:ring-2 focus:ring-[var(--blue-600)]/20"
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function getInitials(name?: string | null) {
-  if (!name) return "LH"
-  return name
-    .split(/[\s,-]+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("")
-}
+function SpeakerEditor({ speaker, lookup, onClose, onSaved }: { speaker: Speaker | null; lookup: Lookup; onClose: () => void; onSaved: () => void }) {
+  const [form, setForm] = useState({ full_name: speaker?.full_name ?? "", credentials: speaker?.credentials ?? "", email: speaker?.email ?? "", title: speaker?.title ?? "", contact_info: speaker?.contact_info ?? "", bio: speaker?.bio ?? "", is_active: speaker?.is_active ?? true, seminar_title: "", seminar_description: "", category_id: "", department_id: "", status_id: "" })
+  const [seminar, setSeminar] = useState<Partial<Seminar> | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState("")
+  const [error, setError] = useState("")
 
-function getFirstSeminar(speaker: Partial<Speaker>) {
-  return speaker.seminars?.[0]
-}
-
-function getCategoryName(speaker: Partial<Speaker>) {
-  return getFirstSeminar(speaker)?.categories?.name ?? "Specialists"
-}
-
-function getDepartmentName(speaker: Partial<Speaker>) {
-  return getFirstSeminar(speaker)?.departments?.name ?? ""
-}
-
-function getTopicTags(speaker: Partial<Speaker>) {
-  const topicTitles = speaker.speaker_topics?.map((item) => item.topics?.title).filter(Boolean) ?? []
-  const seminarTitle = getFirstSeminar(speaker)?.title
-  const unique = Array.from(new Set([...topicTitles, seminarTitle].filter(Boolean) as string[]))
-  return unique.slice(0, 3)
-}
-
-function getSpeakerPhoto(speaker: Partial<Speaker>) {
-  const record = speaker as Partial<Speaker> & Record<string, unknown>
-  const photo =
-    record.photo_url || record.photoUrl || record.image_url || record.headshot_url || record.profile_image
-  return typeof photo === "string" && photo.length > 0 ? photo : null
-}
-
-function formatCategoryLabel(category: string) {
-  if (category === "Integrative/Lifestyle") return "Integrative"
-  if (category === "Orthopedics and PT") return "Orthopedics"
-  return category
-}
-
-// ── FilterChip ────────────────────────────────────────────────────────────────
-function FilterChip({
-  children,
-  active,
-  onClick,
-}: {
-  children: React.ReactNode
-  active?: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group inline-flex h-12 min-w-[118px] items-center justify-center rounded-full border px-9 text-sm font-bold tracking-tight transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70 ${
-        active
-          ? "border-emerald-400/70 bg-gradient-to-r from-emerald-500 to-teal-500 text-white shadow-[0_10px_24px_rgba(16,185,129,0.28)]"
-          : "border-white/70 bg-white/68 text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur-xl hover:border-emerald-200 hover:bg-emerald-50/80 hover:text-emerald-700"
-      }`}
-    >
-      {children}
-    </button>
-  )
-}
-
-// ── ActiveFilter tag ──────────────────────────────────────────────────────────
-function ActiveFilter({ children, onRemove }: { children: React.ReactNode; onRemove: () => void }) {
-  return (
-    <motion.button
-      type="button"
-      onClick={onRemove}
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -6 }}
-      className="inline-flex h-11 min-w-[132px] items-center justify-center gap-2 rounded-full border border-emerald-200/80 bg-emerald-50/80 px-6 text-xs font-bold text-emerald-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_22px_rgba(16,185,129,0.10)] transition hover:bg-emerald-100/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/70"
-    >
-      {children}
-      <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-        <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 1 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-      </svg>
-    </motion.button>
-  )
-}
-
-// ── GlassSelect ───────────────────────────────────────────────────────────────
-function GlassSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string
-  value: string
-  onChange: (value: string) => void
-  options: { label: string; value: string }[]
-}) {
-  return (
-    <div className="min-w-[210px] flex-1 border-l border-slate-200/60 pl-6">
-      <label className="mb-2 block text-xs font-bold text-slate-500">{label}</label>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="h-12 w-full appearance-none rounded-full border border-white/80 bg-white/72 px-7 pr-12 text-sm font-bold text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_26px_rgba(15,23,42,0.08)] outline-none backdrop-blur-xl transition focus:border-emerald-300 focus:ring-2 focus:ring-emerald-200/80"
-        >
-          {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <svg
-          className="pointer-events-none absolute right-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500"
-          fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </div>
-    </div>
-  )
-}
-
-// ── Speaker Card ──────────────────────────────────────────────────────────────
-function SpeakerCard({ speaker }: { speaker: Partial<Speaker> }) {
-  const name = speaker.full_name ?? "Lee Health Speaker"
-  const credentials = speaker.credentials ?? getDepartmentName(speaker) ?? "Lee Health Expert"
-  const category = getCategoryName(speaker)
-  const topics = getTopicTags(speaker)
-  const remainingCount = Math.max(
-    (speaker.speaker_topics?.length ?? 0) + (getFirstSeminar(speaker)?.title ? 1 : 0) - 3,
-    0
-  )
-  const photo = getSpeakerPhoto(speaker)
-  const isAvailable = speaker.is_active ?? true
-  const config = categoryConfig[category] ?? categoryConfig.Specialists
-
-  const content = (
-    <motion.article
-      whileHover={{ y: -5 }}
-      transition={{ type: "spring", stiffness: 330, damping: 28 }}
-      className={`group relative flex h-full min-h-[196px] w-full min-w-0 flex-col overflow-hidden rounded-[30px] border border-white/75 bg-gradient-to-br ${config.tint} p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.88),0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-2xl transition-all duration-300 hover:border-emerald-200/90 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_18px_42px_rgba(15,23,42,0.10)]`}
-      style={{ "--speaker-glow": config.glow } as CSSProperties}
-    >
-      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-white/90" />
-      <div className="pointer-events-none absolute -right-10 -top-12 h-32 w-32 rounded-full bg-[var(--speaker-glow)] blur-3xl opacity-0 transition-opacity duration-300 group-hover:opacity-80" />
-
-      {/* Row 1: badge left, status dot right */}
-      <div className="mb-4 flex w-full items-center justify-between gap-3">
-        <span className={`inline-flex min-w-0 items-center rounded-full border px-3.5 py-1.5 text-xs font-black leading-none shadow-[inset_0_1px_0_rgba(255,255,255,0.75)] ${config.badge}`}>
-          <span className="truncate">{formatCategoryLabel(category)}</span>
-        </span>
-        <span
-          className={`h-3.5 w-3.5 shrink-0 rounded-full shadow-[0_0_0_4px_rgba(255,255,255,0.72)] ${
-            isAvailable ? config.dot : "bg-amber-400"
-          }`}
-          aria-label={isAvailable ? "Available" : "Limited availability"}
-        />
-      </div>
-
-      {/* Row 2: avatar + identity */}
-      <div className="flex min-w-0 flex-1 items-start gap-5">
-        <div className="relative h-[84px] w-[84px] shrink-0 overflow-hidden rounded-full border border-white/90 bg-white/60 p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_10px_28px_rgba(15,23,42,0.10)]">
-          <div className="h-full w-full overflow-hidden rounded-full bg-gradient-to-br from-slate-100 to-cyan-100">
-            {photo ? (
-              <img
-                src={photo}
-                alt={`${name} profile photo`}
-                className="h-full w-full object-cover object-top"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-sky-300 to-cyan-500 text-xl font-black text-white">
-                {getInitials(name)}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="min-w-0 flex-1">
-          <h3 className="line-clamp-2 min-w-0 text-[19px] font-black leading-[1.12] tracking-[-0.025em] text-slate-950 [overflow-wrap:anywhere]">
-            {name}
-          </h3>
-          <p className="mt-1 min-w-0 truncate text-[15px] font-bold leading-snug text-slate-500">
-            {credentials}
-          </p>
-        </div>
-      </div>
-
-      {/* Row 3: topic tags pinned to the card's bottom edge (inside padding) */}
-      {topics.length > 0 && (
-        <div className="mt-4 flex min-w-0 flex-wrap gap-2">
-          {topics.map((topic) => (
-            <span
-              key={topic}
-              title={topic}
-              className="inline-flex max-w-[190px] items-center rounded-full border border-white/85 bg-white/72 px-4 py-1.5 text-[11px] font-black leading-none text-slate-500 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_5px_14px_rgba(15,23,42,0.05)]"
-            >
-              <span className="truncate">{topic}</span>
-            </span>
-          ))}
-          {remainingCount > 0 && (
-            <span className="inline-flex items-center rounded-full border border-emerald-200/80 bg-emerald-50/80 px-3 py-1.5 text-[11px] font-black leading-none text-emerald-700">
-              +{remainingCount}
-            </span>
-          )}
-        </div>
-      )}
-    </motion.article>
-  )
-
-  if (speaker.speaker_id) {
-    return (
-      <Link
-        href={`/speakers/${speaker.speaker_id}`}
-        className="block h-full min-w-0 rounded-[30px] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80"
-      >
-        {content}
-      </Link>
-    )
+  async function saveSpeaker(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setError(""); setMessage("")
+    const response = await fetch(speaker ? `/api/admin/speakers/${speaker.speaker_id}` : "/api/admin/speakers", { method: speaker ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) })
+    const result = await response.json()
+    if (!response.ok) setError(result.error || "Speaker could not be saved.")
+    else { setMessage("Speaker saved."); onSaved() }
+    setSaving(false)
   }
 
-  return content
-}
+  async function uploadPhoto(file?: File) {
+    if (!speaker || !file) return
+    setSaving(true); setError("")
+    const data = new FormData(); data.append("photo", file)
+    const response = await fetch(`/api/admin/speakers/${speaker.speaker_id}/photo`, { method: "POST", body: data })
+    const result = await response.json()
+    if (!response.ok) setError(result.error || "Photo could not be uploaded.")
+    else { setMessage("Speaker photo updated."); onSaved() }
+    setSaving(false)
+  }
 
-// ── Background ────────────────────────────────────────────────────────────────
-function BackgroundAtmosphere() {
+  async function saveSeminar(event: FormEvent) {
+    event.preventDefault(); if (!speaker || !seminar) return
+    setSaving(true); setError("")
+    const editing = Boolean(seminar.seminar_id)
+    const response = await fetch(editing ? `/api/admin/seminars/${seminar.seminar_id}` : `/api/admin/speakers/${speaker.speaker_id}/seminars`, { method: editing ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(seminar) })
+    const result = await response.json()
+    if (!response.ok) setError(result.error || "Seminar could not be saved.")
+    else { setMessage("Seminar saved."); setSeminar(null); onSaved() }
+    setSaving(false)
+  }
+
+  async function archive() {
+    if (!speaker || !window.confirm(`Archive ${speaker.full_name}? The record and seminars will be preserved.`)) return
+    const response = await fetch(`/api/admin/speakers/${speaker.speaker_id}`, { method: "DELETE" })
+    if (response.ok) { onSaved(); onClose() } else setError("Speaker could not be archived.")
+  }
+
   return (
-    <div className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
-      <div className="absolute inset-0 bg-[linear-gradient(135deg,#f8fcff_0%,#eff7ff_38%,#f2fbf7_68%,#fbfdff_100%)]" />
-      <div className="absolute left-[-160px] top-[180px] h-[360px] w-[360px] rounded-full border border-white/50 bg-white/24 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)] backdrop-blur-xl" />
-      <div className="absolute left-[92px] top-[145px] h-[118px] w-[118px] rounded-full bg-emerald-300/24 blur-sm" />
-      <div className="absolute right-[-120px] top-[190px] h-[260px] w-[260px] rounded-full bg-sky-300/22 blur-sm" />
-      <div className="absolute right-[20px] top-[72px] h-[86px] w-[86px] rounded-full bg-blue-300/25 blur-[1px]" />
-      <div className="absolute left-[44%] top-[345px] h-[260px] w-[520px] -translate-x-1/2 rounded-full bg-emerald-300/16 blur-3xl" />
-      <div className="absolute right-[23%] top-[120px] h-[300px] w-[420px] rounded-full bg-cyan-200/22 blur-3xl" />
+    <div className="fixed inset-0 z-[70] flex justify-end bg-[var(--navy-950)]/35" role="dialog" aria-modal="true" aria-labelledby="speaker-editor-title" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
+      <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-5 shadow-[var(--shadow-lg)] sm:p-8">
+        <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--green-600)]">Speaker management</p><h2 id="speaker-editor-title" className="mt-2 text-2xl font-bold">{speaker ? `Edit ${speaker.full_name}` : "Add a speaker"}</h2></div><button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-[var(--radius-input)] border border-[var(--border)]" aria-label="Close editor"><X className="h-5 w-5" /></button></div>
+        <form onSubmit={saveSpeaker} className="mt-8 space-y-5">
+          <div className="grid gap-5 sm:grid-cols-2"><Field label="Full name"><input required value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} className={fieldClass} /></Field><Field label="Credentials"><input value={form.credentials} onChange={(event) => setForm({ ...form, credentials: event.target.value })} className={fieldClass} /></Field></div>
+          <div className="grid gap-5 sm:grid-cols-2"><Field label="Email"><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className={fieldClass} /></Field><Field label="Title"><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className={fieldClass} /></Field></div>
+          <Field label="Contact information"><input value={form.contact_info} onChange={(event) => setForm({ ...form, contact_info: event.target.value })} className={fieldClass} /></Field>
+          <Field label="Biography"><textarea rows={5} value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} className={`${fieldClass} h-auto resize-y py-3 leading-6`} /></Field>
+          <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={form.is_active} onChange={(event) => setForm({ ...form, is_active: event.target.checked })} className="h-4 w-4 accent-[var(--green-600)]" /> Available for requests</label>
+          {!speaker && <div className="rounded-[var(--radius-card-sm)] bg-[var(--canvas-subtle)] p-4"><p className="mb-4 text-sm font-bold">Optional first seminar</p><Field label="Seminar title"><input value={form.seminar_title} onChange={(event) => setForm({ ...form, seminar_title: event.target.value })} className={fieldClass} /></Field><div className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="Category"><select value={form.category_id} onChange={(event) => setForm({ ...form, category_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.categories.map((item) => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select></Field><Field label="Department"><select value={form.department_id} onChange={(event) => setForm({ ...form, department_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.departments.map((item) => <option key={item.department_id} value={item.department_id}>{item.name}</option>)}</select></Field><Field label="Status"><select value={form.status_id} onChange={(event) => setForm({ ...form, status_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.statuses.map((item) => <option key={item.status_id} value={item.status_id}>{item.label}</option>)}</select></Field></div></div>}
+          {error && <p role="alert" className="text-sm text-[var(--error)]">{error}</p>}{message && <p role="status" className="text-sm text-[var(--green-700)]">{message}</p>}
+          <div className="flex flex-wrap gap-3"><button disabled={saving} className="h-11 rounded-[var(--radius-button)] bg-[var(--green-600)] px-5 text-sm font-bold text-white disabled:opacity-60">{saving ? "Saving…" : "Save changes"}</button>{speaker && <label className="inline-flex h-11 cursor-pointer items-center rounded-[var(--radius-button)] border border-[var(--border)] px-5 text-sm font-semibold">Replace photo<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => void uploadPhoto(event.target.files?.[0])} /></label>}{speaker && <button type="button" onClick={archive} className="h-11 rounded-[var(--radius-button)] px-4 text-sm font-semibold text-[var(--error)]">Archive speaker</button>}</div>
+        </form>
+
+        {speaker && <section className="mt-10 border-t border-[var(--border)] pt-8"><div className="flex items-center justify-between"><div><h3 className="text-lg font-bold">Seminars</h3><p className="mt-1 text-sm text-[var(--text-muted)]">Topics associated with this speaker.</p></div><button type="button" onClick={() => setSeminar({ title: "", description: "", category_id: null, department_id: null, status_id: null })} className="text-sm font-semibold text-[var(--green-700)]">Add seminar</button></div><div className="mt-4 space-y-2">{speaker.seminars?.length ? speaker.seminars.map((item) => <button key={item.seminar_id} type="button" onClick={() => setSeminar(item)} className="flex w-full items-start justify-between gap-4 rounded-[var(--radius-input)] border border-[var(--border)] p-4 text-left hover:bg-[var(--canvas-subtle)]"><span className="min-w-0"><span className="block font-semibold [overflow-wrap:anywhere]">{item.title}</span><span className="mt-1 block text-xs text-[var(--text-muted)]">{item.categories?.name || "No category"}</span></span><span className="shrink-0 text-sm font-semibold text-[var(--green-700)]">Edit</span></button>) : <p className="rounded-[var(--radius-input)] bg-[var(--canvas-subtle)] p-4 text-sm text-[var(--text-muted)]">No seminars yet.</p>}</div></section>}
+
+        {seminar && <form onSubmit={saveSeminar} className="mt-6 rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-[var(--canvas-subtle)] p-5"><h3 className="font-bold">{seminar.seminar_id ? "Edit seminar" : "Add seminar"}</h3><Field label="Title"><input required value={seminar.title ?? ""} onChange={(event) => setSeminar({ ...seminar, title: event.target.value })} className={fieldClass} /></Field><div className="mt-4"><Field label="Description"><textarea rows={4} value={seminar.description ?? ""} onChange={(event) => setSeminar({ ...seminar, description: event.target.value })} className={`${fieldClass} h-auto py-3`} /></Field></div><div className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="Category"><select value={seminar.category_id ?? ""} onChange={(event) => setSeminar({ ...seminar, category_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.categories.map((item) => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select></Field><Field label="Department"><select value={seminar.department_id ?? ""} onChange={(event) => setSeminar({ ...seminar, department_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.departments.map((item) => <option key={item.department_id} value={item.department_id}>{item.name}</option>)}</select></Field><Field label="Status"><select value={seminar.status_id ?? ""} onChange={(event) => setSeminar({ ...seminar, status_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.statuses.map((item) => <option key={item.status_id} value={item.status_id}>{item.label}</option>)}</select></Field></div><div className="mt-5 flex gap-3"><button disabled={saving} className="h-10 rounded-[var(--radius-button)] bg-[var(--green-600)] px-4 text-sm font-bold text-white">Save seminar</button><button type="button" onClick={() => setSeminar(null)} className="h-10 px-4 text-sm font-semibold">Cancel</button></div></form>}
+      </div>
     </div>
   )
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-export default function SpeakersPage() {
-  const { speakers: dbSpeakers, loading } = useSpeakers({})
-  const { user, isStakeholder, signOut } = useAuth()
-  const router = useRouter()
-
+export default function AdminSpeakersPage() {
+  const [speakers, setSpeakers] = useState<Speaker[]>([])
+  const [lookup, setLookup] = useState<Lookup>(emptyLookup)
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([])
-  const [selectedDepartment, setSelectedDepartment] = useState("all")
-  const [selectedAvailability, setSelectedAvailability] = useState("all")
-  const [showMoreCategories, setShowMoreCategories] = useState(false)
-  const [filtersCollapsed, setFiltersCollapsed] = useState(false)
-  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_COUNT)
+  const [category, setCategory] = useState("all")
+  const [availability, setAvailability] = useState("all")
+  const [editing, setEditing] = useState<Speaker | null | undefined>(undefined)
+  const [error, setError] = useState("")
+  const [malformedCount, setMalformedCount] = useState(0)
 
-  const speakerList = useMemo(() => (dbSpeakers ?? []) as Partial<Speaker>[], [dbSpeakers])
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError("")
+    try {
+      const response = await fetch("/api/admin/speakers")
+      const data = await response.json().catch(() => ({})) as { error?: string; speakers?: unknown; malformedSpeakerCount?: number; categories?: Lookup["categories"]; departments?: Lookup["departments"]; statuses?: Lookup["statuses"] }
+      if (!response.ok) throw new Error(data.error || `Speaker data could not be loaded (${response.status}).`)
 
-  const categoryCounts = useMemo(() => {
-    const counts: Record<string, number> = {}
-    speakerList.forEach((sp) => {
-      const cat = getCategoryName(sp)
-      counts[cat] = (counts[cat] ?? 0) + 1
-    })
-    return counts
-  }, [speakerList])
-
-  const sortedCategories = useMemo(() => {
-    const fromStatic = categories.filter((c) => categoryCounts[c] > 0)
-    const fromDB = Object.keys(categoryCounts).filter((c) => !categories.includes(c) && categoryCounts[c] > 0)
-    const merged = Array.from(new Set([...fromStatic, ...fromDB]))
-    return merged.sort((a, b) => (categoryCounts[b] ?? 0) - (categoryCounts[a] ?? 0))
-  }, [categoryCounts])
-
-  const primaryCategories = useMemo(() => {
-    const preferred = ["Nutrition", "Cardiac", "Surgery", "Mental Health", "Cancer", "Vascular", "Pharmacy"]
-    const withSpeakers = preferred.filter((c) => categoryCounts[c] > 0)
-    const extras = sortedCategories.filter((c) => !withSpeakers.includes(c)).slice(0, Math.max(0, 6 - withSpeakers.length))
-    return [...withSpeakers, ...extras]
-  }, [sortedCategories, categoryCounts])
-
-  const extraCategories = useMemo(
-    () => sortedCategories.filter((c) => !primaryCategories.includes(c)),
-    [primaryCategories, sortedCategories]
-  )
-
-  const departments = useMemo(() => {
-    const vals = speakerList.map(getDepartmentName).filter(Boolean)
-    return Array.from(new Set(vals)).sort((a, b) => a.localeCompare(b))
-  }, [speakerList])
-
-  const availableCount = useMemo(() => speakerList.filter((s) => s.is_active ?? true).length, [speakerList])
-  const limitedCount = speakerList.length - availableCount
+      const normalized = normalizeSpeakerRecords(data.speakers)
+      setSpeakers(normalized.speakers)
+      setMalformedCount((data.malformedSpeakerCount ?? 0) + normalized.malformedCount)
+      setLookup({
+        categories: Array.isArray(data.categories) ? data.categories : [],
+        departments: Array.isArray(data.departments) ? data.departments : [],
+        statuses: Array.isArray(data.statuses) ? data.statuses : [],
+      })
+      setEditing((current) => current ? normalized.speakers.find((item) => item.speaker_id === current.speaker_id) : current)
+    } catch (caught) {
+      setSpeakers([])
+      setMalformedCount(0)
+      setError(caught instanceof Error ? caught.message : "Speaker data could not be loaded.")
+    } finally {
+      setLoading(false)
+    }
+  // React state setters are stable; this loader intentionally has no state-value dependencies.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  useEffect(() => {
+    const handle = window.setTimeout(() => void load(), 0)
+    return () => window.clearTimeout(handle)
+  }, [load])
 
   const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return speakerList.filter((sp) => {
-      const sem = getFirstSeminar(sp)
-      const cat = getCategoryName(sp)
-      const dept = getDepartmentName(sp)
-      const topicsText = sp.speaker_topics?.map((t) => t.topics?.title).join(" ") ?? ""
-      const haystack = [
-        sp.full_name ?? "",
-        sp.credentials ?? "",
-        dept,
-        cat,
-        sem?.title ?? "",
-        sem?.description ?? "",
-        topicsText,
-      ].join(" ").toLowerCase()
-
-      const matchesSearch = !q || haystack.includes(q)
-      const matchesCat = selectedCategories.length === 0 || selectedCategories.includes(cat)
-      const matchesDept = selectedDepartment === "all" || dept === selectedDepartment
-      const active = sp.is_active ?? true
-      const matchesAvail =
-        selectedAvailability === "all" ||
-        (selectedAvailability === "available" && active) ||
-        (selectedAvailability === "limited" && !active)
-
-      return matchesSearch && matchesCat && matchesDept && matchesAvail
+    const query = search.trim().toLowerCase()
+    return speakers.filter((speaker) => {
+      const searchText = `${speaker.full_name} ${speaker.email ?? ""} ${speaker.credentials ?? ""} ${getDepartmentName(speaker)} ${getCategoryName(speaker)} ${getStatusName(speaker)} ${getSeminarTitles(speaker).join(" ")} ${getSpeakerDescription(speaker)}`
+      const matchesSearch = !query || searchText.toLowerCase().includes(query)
+      const matchesCategory = category === "all" || getCategoryName(speaker) === category
+      const matchesAvailability = availability === "all" || (availability === "available" ? speaker.is_active : !speaker.is_active)
+      return matchesSearch && matchesCategory && matchesAvailability
     })
-  }, [search, selectedCategories, selectedDepartment, selectedAvailability, speakerList])
-
-  useEffect(() => {
-    setVisibleCount(INITIAL_VISIBLE_COUNT)
-  }, [search, selectedCategories, selectedDepartment, selectedAvailability])
-
-  const visibleSpeakers = filtered.slice(0, visibleCount)
-  const hasMore = visibleCount < filtered.length
-  const shownCount = Math.min(visibleCount, filtered.length)
-
-  const activeFilterCount =
-    selectedCategories.length +
-    (selectedDepartment !== "all" ? 1 : 0) +
-    (selectedAvailability !== "all" ? 1 : 0) +
-    (search.trim() ? 1 : 0)
-
-  function toggleCategory(cat: string) {
-    setSelectedCategories((cur) =>
-      cur.includes(cat) ? cur.filter((c) => c !== cat) : [...cur, cat]
-    )
-  }
-
-  function clearAll() {
-    setSearch("")
-    setSelectedCategories([])
-    setSelectedDepartment("all")
-    setSelectedAvailability("all")
-    setShowMoreCategories(false)
-  }
-
-  async function handleSignOut() {
-    await signOut()
-    router.push("/")
-  }
+  }, [availability, category, search, speakers])
 
   return (
-    <div className="relative min-h-screen overflow-x-clip text-slate-950">
-      <BackgroundAtmosphere />
-
-      {/* ── NAV ── */}
-      <header className="relative z-50 px-6 pt-5 sm:px-8 lg:px-14 xl:px-16">
-        <nav className="mx-auto flex h-[72px] w-full max-w-[1900px] items-center justify-between rounded-[28px] border border-white/75 bg-white/72 px-8 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_50px_rgba(15,23,42,0.10)] backdrop-blur-2xl sm:px-9">
-          <Link href="/" className="flex shrink-0 items-center focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80">
-            <Image
-              src="/speaker_logo.png"
-              alt="Lee Health Speakers Bureau"
-              width={220}
-              height={60}
-              className="h-[58px] w-auto object-contain"
-              priority
-              unoptimized
-            />
-          </Link>
-
-          <div className="hidden items-center gap-16 md:flex">
-            {[
-              { label: "Speakers", href: "/speakers" },
-              { label: "About Us", href: "/about" },
-              { label: "For Partners", href: "/partners" },
-            ].map((item) => {
-              const active = item.label === "Speakers"
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={`relative px-1 py-5 text-sm font-black transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 ${
-                    active ? "text-emerald-700" : "text-slate-600 hover:text-slate-950"
-                  }`}
-                >
-                  {item.label}
-                  {active && (
-                    <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-400" />
-                  )}
-                </Link>
-              )
-            })}
-          </div>
-
-          <div className="flex items-center gap-3">
-            {user ? (
-              <>
-                {isStakeholder && (
-                  <Link
-                    href="/admin/speakers"
-                    className="hidden h-12 min-w-[100px] items-center justify-center rounded-full border border-white/80 bg-white/68 px-6 text-sm font-bold text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 sm:inline-flex"
-                  >
-                    Admin
-                  </Link>
-                )}
-                <button
-                  type="button"
-                  onClick={handleSignOut}
-                  className="hidden h-12 min-w-[110px] items-center justify-center rounded-full border border-rose-200 bg-rose-50/80 px-6 text-sm font-bold text-rose-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] backdrop-blur-xl transition hover:bg-rose-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-300/80 sm:inline-flex"
-                >
-                  Sign Out
-                </button>
-              </>
-            ) : (
-              <Link
-                href="/login"
-                className="hidden h-12 min-w-[122px] items-center justify-center rounded-full border border-white/80 bg-white/68 px-8 text-sm font-bold text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur-xl transition hover:bg-white/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80 sm:inline-flex"
-              >
-                Team Login
-              </Link>
-            )}
-            <Link
-              href="/partners"
-              className="inline-flex h-12 min-w-[224px] items-center justify-center gap-3 rounded-full bg-gradient-to-r from-emerald-500 to-green-600 px-10 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_12px_30px_rgba(16,185,129,0.36)] transition hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_16px_38px_rgba(16,185,129,0.42)] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80"
-            >
-              <span className="hidden sm:inline">Request a Speaker</span>
-              <span className="sm:hidden">Request</span>
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14m-6-6 6 6-6 6" />
-              </svg>
-            </Link>
-          </div>
-        </nav>
-      </header>
-
-      <main className="relative z-10 mx-auto w-full max-w-[1900px] px-8 pb-20 pt-10 sm:px-10 lg:px-16 xl:px-20">
-
-        {/* ── HERO ── */}
-        <section className="grid items-center gap-16 pb-24 pt-12 lg:grid-cols-[minmax(680px,0.78fr)_minmax(720px,1fr)] lg:pb-28">
-          <motion.div
-            initial={{ opacity: 0, y: 18 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.55, ease: [0.22, 1, 0.36, 1] }}
-            className="w-full max-w-[720px]"
-          >
-            <h1 className="text-[clamp(3.25rem,4.15vw,4.95rem)] font-black leading-[1.08] tracking-[-0.055em] text-slate-950">
-              Find the right speaker
-              <br />
-              for{" "}
-              <span className="bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-500 bg-clip-text text-transparent">
-                your next event.
-              </span>
-            </h1>
-            <p className="mt-5 max-w-[470px] text-[17px] font-semibold leading-8 text-slate-500">
-              Browse Lee Health experts and engaging topics
-              <br className="hidden sm:block" /> for your community.
-            </p>
-
-            <div className="mt-8 flex h-14 w-full max-w-[650px] items-center gap-4 rounded-full border border-white/80 bg-white/72 px-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_16px_42px_rgba(15,23,42,0.12)] backdrop-blur-2xl transition focus-within:border-emerald-300 focus-within:ring-4 focus-within:ring-emerald-100/80">
-              <svg className="h-6 w-6 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.1} d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-              </svg>
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                type="text"
-                aria-label="Search speakers"
-                placeholder="Search by name, expertise, or keyword..."
-                className="min-w-0 flex-1 bg-transparent text-base font-semibold text-slate-700 placeholder:text-slate-400 focus:outline-none"
-              />
-              {search && (
-                <button
-                  type="button"
-                  onClick={() => setSearch("")}
-                  className="shrink-0 rounded-full p-1 text-slate-400 hover:text-slate-600"
-                  aria-label="Clear search"
-                >
-                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 1 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-                  </svg>
-                </button>
-              )}
-              <button
-                type="button"
-                aria-label="Search"
-                className="inline-flex h-11 min-w-[66px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-green-600 px-5 text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_10px_24px_rgba(16,185,129,0.38)] transition hover:scale-[1.03] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.35} d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-                </svg>
-              </button>
-            </div>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, x: 24 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1], delay: 0.08 }}
-            className="relative hidden lg:block"
-          >
-            <div className="absolute -inset-4 rounded-[42px] bg-gradient-to-br from-emerald-300/25 via-cyan-200/20 to-blue-300/25 blur-2xl" />
-            <div className="relative h-[280px] overflow-hidden rounded-[34px] border border-white/80 bg-white/60 p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_20px_60px_rgba(15,23,42,0.14)] backdrop-blur-2xl xl:h-[310px]">
-              <Image
-                src="/hero_image.png"
-                alt="Lee Health speaker presenting to a community audience"
-                fill
-                sizes="(min-width: 1024px) 46vw, 100vw"
-                className="rounded-[28px] object-cover"
-                priority
-              />
-              <div className="absolute inset-2 rounded-[28px] ring-1 ring-inset ring-white/55" />
-            </div>
-          </motion.div>
-        </section>
-
-        {/* ── FILTER BAR ── */}
-        <section className="relative z-20 mt-10 rounded-[30px] border border-white/80 bg-white/70 p-6 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_18px_55px_rgba(15,23,42,0.12)] backdrop-blur-2xl sm:p-7">
-          <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
-            <div className="flex shrink-0 items-center gap-3 rounded-full border border-white/80 bg-white/70 px-8 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.07)] backdrop-blur-xl">
-              <svg className="h-5 w-5 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 6h18M7 12h10M10 18h4" />
-              </svg>
-              <span className="text-base font-black text-slate-800">Filters</span>
-              {activeFilterCount > 0 && (
-                <span className="grid h-6 w-6 place-items-center rounded-full bg-emerald-500 text-xs font-black text-white">
-                  {activeFilterCount}
-                </span>
-              )}
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="grid gap-6 xl:grid-cols-[minmax(0,1.55fr)_minmax(240px,0.45fr)_minmax(260px,0.48fr)_auto] xl:items-start">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-                    <span className="mr-2 text-sm font-bold text-slate-500">Category</span>
-                    <FilterChip active={selectedCategories.length === 0} onClick={() => setSelectedCategories([])}>
-                      All
-                    </FilterChip>
-                    {primaryCategories.map((cat) => (
-                      <FilterChip
-                        key={cat}
-                        active={selectedCategories.includes(cat)}
-                        onClick={() => toggleCategory(cat)}
-                      >
-                        {formatCategoryLabel(cat)}
-                      </FilterChip>
-                    ))}
-                    {extraCategories.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowMoreCategories((c) => !c)}
-                        className="inline-flex h-12 min-w-[128px] items-center justify-center gap-2 rounded-full border border-white/80 bg-white/68 px-9 text-sm font-bold text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_24px_rgba(15,23,42,0.06)] backdrop-blur-xl transition hover:border-emerald-200 hover:text-emerald-700 focus:outline-none"
-                      >
-                        More
-                        <motion.svg
-                          animate={{ rotate: showMoreCategories ? 180 : 0 }}
-                          className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M19 9l-7 7-7-7" />
-                        </motion.svg>
-                      </button>
-                    )}
-                  </div>
-
-                  <AnimatePresence>
-                    {showMoreCategories && extraCategories.length > 0 && (
-                      <motion.div
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: "auto" }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden"
-                      >
-                        <div className="mt-4 flex flex-wrap gap-3">
-                          {extraCategories.map((cat) => (
-                            <FilterChip
-                              key={cat}
-                              active={selectedCategories.includes(cat)}
-                              onClick={() => toggleCategory(cat)}
-                            >
-                              {formatCategoryLabel(cat)}
-                            </FilterChip>
-                          ))}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                {departments.length > 0 && (
-                  <GlassSelect
-                    label="Department"
-                    value={selectedDepartment}
-                    onChange={setSelectedDepartment}
-                    options={[
-                      { label: "All Departments", value: "all" },
-                      ...departments.map((d) => ({ label: d, value: d })),
-                    ]}
-                  />
-                )}
-
-                <GlassSelect
-                  label="Availability"
-                  value={selectedAvailability}
-                  onChange={setSelectedAvailability}
-                  options={[
-                    { label: "All Availability", value: "all" },
-                    { label: `Available Now (${availableCount})`, value: "available" },
-                    { label: `Limited (${limitedCount})`, value: "limited" },
-                  ]}
-                />
-
-                <button
-                  type="button"
-                  onClick={() => setFiltersCollapsed((c) => !c)}
-                  className="hidden h-11 w-11 place-items-center self-end rounded-full border border-white/80 bg-white/70 text-slate-600 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_24px_rgba(15,23,42,0.07)] transition hover:text-emerald-700 focus:outline-none xl:grid"
-                  aria-label={filtersCollapsed ? "Expand filters" : "Collapse filters"}
-                >
-                  <motion.svg
-                    animate={{ rotate: filtersCollapsed ? 180 : 0 }}
-                    className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M5 15l7-7 7 7" />
-                  </motion.svg>
-                </button>
-              </div>
-
-              <AnimatePresence>
-                {!filtersCollapsed && activeFilterCount > 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden"
-                  >
-                    <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-slate-200/55 pt-4">
-                      <span className="text-xs font-bold text-slate-500">Active filters:</span>
-                      <AnimatePresence>
-                        {search.trim() && (
-                          <ActiveFilter onRemove={() => setSearch("")}>Search: {search}</ActiveFilter>
-                        )}
-                        {selectedCategories.map((cat) => (
-                          <ActiveFilter
-                            key={cat}
-                            onRemove={() => setSelectedCategories((c) => c.filter((i) => i !== cat))}
-                          >
-                            {formatCategoryLabel(cat)}
-                          </ActiveFilter>
-                        ))}
-                        {selectedDepartment !== "all" && (
-                          <ActiveFilter onRemove={() => setSelectedDepartment("all")}>
-                            {selectedDepartment}
-                          </ActiveFilter>
-                        )}
-                        {selectedAvailability !== "all" && (
-                          <ActiveFilter onRemove={() => setSelectedAvailability("all")}>
-                            {selectedAvailability === "available" ? "Available Now" : "Limited"}
-                          </ActiveFilter>
-                        )}
-                      </AnimatePresence>
-                      <button
-                        type="button"
-                        onClick={clearAll}
-                        className="ml-auto text-sm font-black text-emerald-700 transition hover:text-emerald-900 focus:outline-none"
-                      >
-                        Clear all
-                      </button>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-        </section>
-
-        {/* ── RESULTS HEADER ── */}
-        <div className="mx-auto mt-8 flex w-full max-w-[1680px] items-center justify-between gap-4 px-1">
-          <motion.p
-            key={`${loading}-${filtered.length}`}
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="inline-flex items-center gap-2 text-sm font-black text-slate-800"
-          >
-            <span className="grid h-7 w-7 place-items-center rounded-full bg-emerald-100 text-emerald-700">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 0 0-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 0 1 5.356-1.857M15 7a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-              </svg>
-            </span>
-            {loading ? "Loading speakers..." : `${filtered.length} speakers found`}
-          </motion.p>
-
-          <div className="hidden items-center gap-2 sm:flex">
-            <span className="text-sm font-semibold text-slate-500">Sort by:</span>
-            <button
-              type="button"
-              className="inline-flex h-10 min-w-[132px] items-center justify-center gap-2 rounded-full border border-white/80 bg-white/72 px-6 text-sm font-black text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_8px_20px_rgba(15,23,42,0.07)] backdrop-blur-xl"
-            >
-              Name (A–Z)
-              <svg className="h-4 w-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-          </div>
-        </div>
-
-        {/* ── SPEAKER GRID ── */}
-        {filtered.length === 0 && !loading ? (
-          <div className="mx-auto mt-6 max-w-[1680px] rounded-[28px] border border-white/80 bg-white/72 px-6 py-16 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_14px_34px_rgba(15,23,42,0.08)] backdrop-blur-2xl">
-            <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-full bg-emerald-100 text-emerald-700">
-              <svg className="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
-              </svg>
-            </div>
-            <h2 className="text-xl font-black text-slate-950">No speakers matched your search</h2>
-            <p className="mt-2 text-sm font-semibold text-slate-500">Try clearing a filter or searching a different topic.</p>
-            <button
-              type="button"
-              onClick={clearAll}
-              className="mt-6 min-w-[160px] rounded-full bg-gradient-to-r from-emerald-500 to-green-600 px-9 py-3 text-sm font-black text-white shadow-[0_12px_30px_rgba(16,185,129,0.32)]"
-            >
-              Clear filters
-            </button>
-          </div>
-        ) : (
-          <motion.section
-            className="mx-auto mt-6 grid w-full max-w-[1680px] grid-cols-1 gap-7 px-1 sm:grid-cols-2 xl:grid-cols-4"
-            initial="hidden"
-            animate="visible"
-            variants={{ visible: { transition: { staggerChildren: 0.045 } } }}
-            aria-label="Speaker directory"
-          >
-            {visibleSpeakers.map((speaker, i) => (
-              <motion.div
-                key={speaker.speaker_id ?? `${speaker.full_name}-${i}`}
-                variants={{ hidden: { opacity: 0, y: 14 }, visible: { opacity: 1, y: 0 } }}
-                className="h-full"
-              >
-                <SpeakerCard speaker={speaker} />
-              </motion.div>
-            ))}
-          </motion.section>
-        )}
-
-        {/* ── LOAD MORE ── */}
-        {filtered.length > 0 && (
-          <div className="mt-8 flex flex-col items-center gap-2">
-            <p className="text-sm font-semibold text-slate-500">
-              Showing {shownCount} of {filtered.length} speakers
-            </p>
-            {hasMore && (
-              <button
-                type="button"
-                onClick={() => setVisibleCount((c) => c + INITIAL_VISIBLE_COUNT)}
-                className="inline-flex h-12 min-w-[270px] items-center justify-center gap-3 rounded-full border border-emerald-400/80 bg-white/60 px-8 text-sm font-black text-emerald-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_26px_rgba(16,185,129,0.13)] backdrop-blur-2xl transition hover:bg-emerald-50 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_14px_30px_rgba(16,185,129,0.18)] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80"
-              >
-                Load More
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* ── CTA ── */}
-        <section className="mx-auto mt-10 max-w-[1680px] overflow-hidden rounded-[28px] border border-white/80 bg-gradient-to-r from-white/72 via-emerald-100/55 to-cyan-100/60 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_14px_42px_rgba(15,23,42,0.10)] backdrop-blur-2xl sm:p-7">
-          <div className="flex flex-col items-center justify-between gap-5 md:flex-row">
-            <div className="flex min-w-0 items-center gap-5">
-              <div className="grid h-16 w-16 shrink-0 place-items-center rounded-full border border-white/80 bg-emerald-400/25 text-emerald-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_10px_26px_rgba(16,185,129,0.15)] backdrop-blur-xl">
-                <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M17 20h5v-2a3 3 0 0 0-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 0 1 5.356-1.857M15 7a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                </svg>
-              </div>
-              <div className="min-w-0">
-                <h2 className="text-2xl font-black tracking-[-0.03em] text-emerald-950">
-                  Can&apos;t find the right speaker?
-                </h2>
-                <p className="mt-1 text-base font-semibold text-slate-600">
-                  Our team is here to help you find the perfect match for your event.
-                </p>
-              </div>
-            </div>
-            <Link
-              href="/partners"
-              className="inline-flex h-12 min-w-[220px] shrink-0 items-center justify-center gap-3 rounded-full bg-gradient-to-r from-emerald-500 to-green-600 px-10 text-sm font-black text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_12px_30px_rgba(16,185,129,0.36)] transition hover:-translate-y-[1px] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.35),0_16px_38px_rgba(16,185,129,0.42)] focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300/80"
-            >
-              Contact Our Team
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14m-6-6 6 6-6 6" />
-              </svg>
-            </Link>
-          </div>
-        </section>
-      </main>
+    <div><SectionHeader eyebrow="Directory management" title="Speakers" description="Add and edit speaker records, photos, availability, and seminars." actions={<><ExcelTools speakers={filtered} lookups={lookup} onImported={() => void load()} /><button type="button" onClick={() => setEditing(null)} className="inline-flex h-10 items-center gap-2 rounded-[var(--radius-button)] bg-[var(--green-600)] px-4 text-sm font-bold text-white"><Plus className="h-4 w-4" /> Add speaker</button></>} />
+      <div className="mt-8 flex flex-col gap-3 rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-white p-4 shadow-[var(--shadow-sm)] sm:flex-row"><label className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-input)] border border-[var(--border)] px-3"><Search className="h-4 w-4 text-[var(--text-muted)]" /><span className="sr-only">Search speakers</span><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search speakers" className="min-w-0 flex-1 outline-none" /></label><select aria-label="Filter category" value={category} onChange={(event) => setCategory(event.target.value)} className={fieldClass}><option value="all">All categories</option>{lookup.categories.map((item) => <option key={item.category_id} value={item.name}>{item.name}</option>)}</select><select aria-label="Filter availability" value={availability} onChange={(event) => setAvailability(event.target.value)} className={fieldClass}><option value="all">All availability</option><option value="available">Available</option><option value="limited">Limited</option></select></div>
+      {malformedCount > 0 && !loading && !error && <p role="status" className="mt-4 rounded-[var(--radius-input)] border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{malformedCount} malformed speaker {malformedCount === 1 ? "record was" : "records were"} skipped because no valid speaker ID was available.</p>}
+      {loading ? (
+        <div role="status" aria-label="Loading speakers" className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{Array.from({ length: 8 }, (_, index) => <SpeakerCardSkeleton key={index} />)}</div>
+      ) : error ? (
+        <div role="alert" className="mt-6 rounded-[var(--radius-card-lg)] border border-red-200 bg-red-50 p-6 text-red-800"><h2 className="font-bold">Speakers could not be loaded</h2><p className="mt-2 text-sm">{error}</p><button type="button" onClick={() => void load()} className="mt-4 h-10 rounded-[var(--radius-button)] border border-red-300 bg-white px-4 text-sm font-semibold">Try again</button></div>
+      ) : filtered.length ? (
+        <div className="mt-6 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{filtered.map((speaker) => {
+          const seminars = getSeminarTitles(speaker)
+          const description = getSpeakerDescription(speaker)
+          return <div key={speaker.speaker_id} className="min-w-0"><SpeakerCard speaker={speaker} /><div className="mt-2 rounded-[var(--radius-card-sm)] border border-[var(--border)] bg-white p-4 text-xs leading-5 text-[var(--text-muted)]"><dl className="grid grid-cols-2 gap-x-3 gap-y-2"><div><dt className="font-semibold text-[var(--navy-950)]">Department</dt><dd>{getDepartmentName(speaker) || "Not assigned"}</dd></div><div><dt className="font-semibold text-[var(--navy-950)]">Status</dt><dd>{getStatusName(speaker) || (speaker.is_active ? "Available" : "Limited")}</dd></div></dl><div className="mt-3"><p className="font-semibold text-[var(--navy-950)]">Seminars</p><p className="text-clamp-2">{seminars.length ? seminars.join("; ") : "None listed"}</p></div>{description && <div className="mt-3"><p className="font-semibold text-[var(--navy-950)]">Description</p><p className="text-clamp-2">{description}</p></div>}</div><button type="button" onClick={() => setEditing(speaker)} className="mt-2 h-10 w-full rounded-[var(--radius-button)] border border-[var(--border)] bg-white text-sm font-semibold hover:border-[var(--green-600)]">Edit speaker</button></div>
+        })}</div>
+      ) : (
+        <div className="mt-6"><EmptyState title="No speakers found" description={speakers.length ? "Adjust the search or filters to see more records." : "No speaker records are currently available in Supabase."} /></div>
+      )}
+      {editing !== undefined && <SpeakerEditor speaker={editing} lookup={lookup} onClose={() => setEditing(undefined)} onSaved={() => void load()} />}
     </div>
   )
 }
