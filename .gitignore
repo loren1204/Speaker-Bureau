@@ -14,11 +14,7 @@
 /coverage
 
 # next.js
-/.next/
-/.next-build/
-/.next-codex/
-/.next-verify/
-/.next-webpack/
+/.next*/
 /out/
 
 # production

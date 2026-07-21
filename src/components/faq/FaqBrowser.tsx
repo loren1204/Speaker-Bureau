@@ -35,7 +35,7 @@ export function FaqBrowser({ items }: { items: FaqItem[] }) {
       </div>
       <article id={selected.id} className="min-w-0 rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-white p-6 shadow-[var(--shadow-sm)] sm:p-8 lg:min-h-[420px]">
         <p className="text-xs font-bold uppercase tracking-[0.12em] text-[var(--green-600)]">{selected.topic}</p><h2 className="mt-3 text-3xl font-bold leading-tight tracking-[-0.03em]">{selected.question}</h2><p className="mt-6 max-w-3xl whitespace-pre-line text-base leading-8 text-[var(--navy-800)]">{selected.answer}</p>
-        <section className="mt-12 border-t border-[var(--border)] pt-7" aria-labelledby="faq-support"><h3 id="faq-support" className="text-lg font-bold">Need additional support?</h3><p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-muted)]">For bug reports, additional support, technical clarification, or problems using the directory, email <a href="mailto:lorenrisocontact@gmail.com" className="font-semibold text-[var(--green-700)] underline decoration-[var(--green-600)]/40 underline-offset-2">lorenrisocontact@gmail.com</a>.</p></section>
+        <section className="mt-12 border-t border-[var(--border)] pt-7" aria-labelledby="faq-support"><h3 id="faq-support" className="text-lg font-bold">Need additional support?</h3><p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--text-muted)]">For bug reports, additional support, technical clarification, or problems using the directory, email <a href="mailto:lorenrisocontact@gmail.com?subject=Speaker%20Directory%20Support" className="font-semibold text-[var(--green-700)] underline decoration-[var(--green-600)]/40 underline-offset-2">lorenrisocontact@gmail.com</a>.</p></section>
       </article>
     </div>
   )

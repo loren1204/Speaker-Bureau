@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { motion } from "framer-motion"
-import { ArrowRight } from "lucide-react"
+import { ArrowRight, Pencil } from "lucide-react"
 import type { Speaker } from "@/models/Speaker"
 import { formatSpeakerName } from "@/lib/speakerName"
 import { formatCategoryLabel, getCategoryName, getDepartmentName, getPrimaryTopic, getSpeakerPhoto, isSpeakerAvailable } from "@/lib/speakerPresentation"
@@ -10,6 +10,7 @@ import { SpeakerPhoto } from "@/components/speakers/SpeakerPhoto"
 
 interface SpeakerCardProps {
   speaker: Partial<Speaker>
+  onEdit?: () => void
 }
 
 /**
@@ -19,7 +20,7 @@ interface SpeakerCardProps {
  * sits inside the card's own padding with shrink-0 and no overflow-hidden
  * ancestor, so it can never be cropped.
  */
-export function SpeakerCard({ speaker }: SpeakerCardProps) {
+export function SpeakerCard({ speaker, onEdit }: SpeakerCardProps) {
   const name = formatSpeakerName(speaker.full_name)
   const credentials = speaker.credentials ?? getDepartmentName(speaker) ?? null
   const category = getCategoryName(speaker)
@@ -31,7 +32,17 @@ export function SpeakerCard({ speaker }: SpeakerCardProps) {
     <motion.article
       whileHover={{ y: -3 }}
       transition={{ duration: 0.19, ease: [0.22, 1, 0.36, 1] }}
-      className="group flex h-full min-h-[220px] min-w-0 flex-col border border-[var(--border)] bg-[var(--canvas)] p-5 shadow-[var(--shadow-sm)] transition-shadow duration-200 hover:shadow-[var(--shadow-md)]"
+      role={onEdit ? "button" : undefined}
+      tabIndex={onEdit ? 0 : undefined}
+      aria-label={onEdit ? `Edit profile for ${name}` : undefined}
+      onClick={onEdit}
+      onKeyDown={onEdit ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault()
+          onEdit()
+        }
+      } : undefined}
+      className={`group flex h-full min-h-[220px] min-w-0 flex-col border border-[var(--border)] bg-[var(--canvas)] p-5 shadow-[var(--shadow-sm)] transition-shadow duration-200 hover:shadow-[var(--shadow-md)] ${onEdit ? "cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blue-600)]" : ""}`}
       style={{ borderRadius: "var(--radius-card-sm)" }}
     >
       <div className="flex min-w-0 items-start gap-3.5">
@@ -84,19 +95,20 @@ export function SpeakerCard({ speaker }: SpeakerCardProps) {
         </div>
       )}
 
-      <div className="mt-3 flex items-center justify-end">
+      <div className={`mt-3 flex items-center ${onEdit ? "justify-between" : "justify-end"}`}>
+        {onEdit && <span className="text-sm font-semibold text-[var(--green-700)]">Edit profile</span>}
         <span
           aria-hidden="true"
           className="grid h-9 w-9 shrink-0 place-items-center text-[var(--green-600)] transition-transform duration-200 group-hover:translate-x-0.5"
           style={{ borderRadius: "var(--radius-circle)", backgroundColor: "var(--mint-100)" }}
         >
-          <ArrowRight className="h-4 w-4" strokeWidth={2.25} />
+          {onEdit ? <Pencil className="h-4 w-4" strokeWidth={2.25} /> : <ArrowRight className="h-4 w-4" strokeWidth={2.25} />}
         </span>
       </div>
     </motion.article>
   )
 
-  if (!speaker.speaker_id) return card
+  if (onEdit || !speaker.speaker_id) return card
 
   return (
     <Link

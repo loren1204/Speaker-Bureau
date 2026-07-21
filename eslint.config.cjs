@@ -5,11 +5,7 @@ const reactHooks = require("eslint-plugin-react-hooks")
 
 module.exports = defineConfig([
   globalIgnores([
-    ".next/**",
-    ".next-build/**",
-    ".next-codex/**",
-    ".next-verify/**",
-    ".next-webpack/**",
+    ".next*/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

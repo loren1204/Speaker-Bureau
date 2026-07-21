@@ -43,11 +43,6 @@
   ],
   "exclude": [
     "node_modules",
-    ".next/build",
-    ".next/cache",
-    ".next-build",
-    ".next-codex",
-    ".next-verify",
-    ".next-webpack"
+    ".next*"
   ]
 }
