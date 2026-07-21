@@ -92,6 +92,29 @@ export interface SpeakerImportSummary {
   unmatchedStatuses: number
 }
 
+export interface SpeakerImportResultSummary {
+  speakersMatched: number
+  speakersInserted: number
+  speakersUpdated: number
+  seminarsMatched: number
+  seminarsInserted: number
+  seminarsUpdated: number
+  duplicateRowsSkipped: number
+  invalidRows: number
+  databaseFailures: number
+  validCandidateRows: number
+  errors: SpeakerImportIssue[]
+}
+
+export type SpeakerImportResultTone = "green" | "blue" | "amber" | "red"
+
+export interface SpeakerImportResultPresentation {
+  tone: SpeakerImportResultTone
+  title: string
+  message: string
+  failedReviewCount: number
+}
+
 export interface ParsedSpeakerWorksheet {
   rows: SpeakerImportRow[]
   groups: SpeakerImportGroup[]
@@ -452,4 +475,65 @@ export function speakerImportPayload(rows: SpeakerImportRow[]): SpeakerImportPay
     seminarTitle: row.seminarTitle,
     seminarDescription: row.seminarDescription,
   }))
+}
+
+export function classifySpeakerImportResult(summary: SpeakerImportResultSummary): SpeakerImportResultPresentation {
+  const writes = summary.speakersInserted + summary.speakersUpdated + summary.seminarsInserted + summary.seminarsUpdated
+  const matches = summary.speakersMatched + summary.seminarsMatched
+  const processedSeminars = summary.seminarsMatched + summary.seminarsInserted + summary.seminarsUpdated
+  const failedReviewCount = summary.invalidRows + summary.databaseFailures
+  const warnings = failedReviewCount + summary.duplicateRowsSkipped
+
+  if (summary.validCandidateRows === 0) {
+    return {
+      tone: "red",
+      title: "No valid records to import",
+      message: "No valid candidate rows were available. Review the validation report and try again.",
+      failedReviewCount,
+    }
+  }
+  const processedRecords = writes + matches
+  if (processedRecords === 0 && processedSeminars === 0 && summary.databaseFailures >= summary.validCandidateRows) {
+    return {
+      tone: "red",
+      title: "Import failed",
+      message: "All valid candidate rows failed during database processing. No records were matched or written.",
+      failedReviewCount,
+    }
+  }
+  if (failedReviewCount > 0) {
+    const lead = matches > 0 && writes === 0
+      ? "Most records already matched existing database entries, so no new records were written."
+      : "The import completed for the records that could be processed."
+    return {
+      tone: "amber",
+      title: "Import completed with warnings",
+      message: `${lead} ${failedReviewCount} ${failedReviewCount === 1 ? "row requires" : "rows require"} review.`,
+      failedReviewCount,
+    }
+  }
+  if (writes === 0 && matches > 0) {
+    return {
+      tone: warnings ? "amber" : "blue",
+      title: "All records already matched",
+      message: warnings
+        ? `No new records were needed. ${summary.duplicateRowsSkipped} duplicate ${summary.duplicateRowsSkipped === 1 ? "row was" : "rows were"} skipped.`
+        : "All valid records already matched existing database entries, so no new records were written.",
+      failedReviewCount,
+    }
+  }
+  if (warnings > 0) {
+    return {
+      tone: "amber",
+      title: "Import completed with warnings",
+      message: `Database changes completed. ${summary.duplicateRowsSkipped} duplicate ${summary.duplicateRowsSkipped === 1 ? "row was" : "rows were"} skipped.`,
+      failedReviewCount,
+    }
+  }
+  return {
+    tone: "green",
+    title: "Import completed",
+    message: "All valid records were processed successfully.",
+    failedReviewCount,
+  }
 }

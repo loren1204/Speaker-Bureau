@@ -5,26 +5,17 @@ import { useState } from "react"
 import type { Speaker } from "@/models/Speaker"
 import {
   MASTER_WORKSHEET_NAME,
+  classifySpeakerImportResult,
   normalizeSpeakerImportSheetName,
   parseSpeakerWorksheet,
   speakerImportPayload,
   speakerImportRowWillBeSkipped,
   type ParsedSpeakerWorksheet,
   type SpeakerImportIssue,
+  type SpeakerImportResultSummary,
 } from "@/lib/speakerImport"
 
 interface Lookup { categories: { name: string }[]; departments: { name: string }[]; statuses: { label: string }[] }
-
-interface ImportResultSummary {
-  speakersMatched: number
-  speakersInserted: number
-  speakersUpdated: number
-  seminarsInserted: number
-  seminarsMatched: number
-  seminarsSkipped: number
-  rowsFailed: number
-  errors: SpeakerImportIssue[]
-}
 
 const EXPORT_HEADERS = ["Speaker ID", "Full Name", "Credentials", "Email", "Contact Info", "Availability", "Photo URL", "Seminar Title", "Seminar Description", "Category", "Department", "Status"]
 const IMPORT_TEMPLATE_HEADERS = ["Provider", "Credentials", "Department", "Category", "Status", "Seminars", "Description"]
@@ -54,9 +45,16 @@ function downloadErrorReport(issues: SpeakerImportIssue[], filename: string) {
   URL.revokeObjectURL(url)
 }
 
-function formatImportSummary(value: ImportResultSummary) {
-  return `${value.speakersMatched} speakers matched, ${value.speakersInserted} inserted, ${value.speakersUpdated} updated; ${value.seminarsInserted} seminars inserted, ${value.seminarsMatched} matched, ${value.seminarsSkipped} skipped; ${value.rowsFailed} rows failed.`
+function formatImportSummary(value: SpeakerImportResultSummary) {
+  return `${value.speakersMatched} speakers matched, ${value.speakersInserted} inserted, ${value.speakersUpdated} updated; ${value.seminarsMatched} seminars matched, ${value.seminarsInserted} inserted, ${value.seminarsUpdated} updated; ${value.duplicateRowsSkipped} duplicate rows skipped, ${value.invalidRows} invalid rows, ${value.databaseFailures} database failures.`
 }
+
+const resultToneClass = {
+  green: "border-green-200 bg-green-50 text-green-900",
+  blue: "border-blue-200 bg-blue-50 text-blue-900",
+  amber: "border-amber-200 bg-amber-50 text-amber-900",
+  red: "border-red-200 bg-red-50 text-red-900",
+} as const
 
 const wrapCell = "whitespace-normal px-3 py-2 align-top leading-5 [overflow-wrap:break-word] [word-break:normal]"
 
@@ -66,7 +64,9 @@ export function ExcelTools({ speakers, lookups, onImported }: { speakers: Speake
   const [selectedSheet, setSelectedSheet] = useState("")
   const [error, setError] = useState("")
   const [loading, setLoading] = useState(false)
-  const [summary, setSummary] = useState("")
+  const [resultSummary, setResultSummary] = useState<SpeakerImportResultSummary | null>(null)
+  const [resultError, setResultError] = useState("")
+  const [reviewResult, setReviewResult] = useState(false)
   const [showAllErrors, setShowAllErrors] = useState(false)
 
   function exportSpeakers() {
@@ -84,7 +84,9 @@ export function ExcelTools({ speakers, lookups, onImported }: { speakers: Speake
   async function chooseFile(file?: File) {
     if (!file) return
     setError("")
-    setSummary("")
+    setResultSummary(null)
+    setResultError("")
+    setReviewResult(false)
     setPreview(null)
     setShowAllErrors(false)
     if (!/\.(xlsx|xls)$/i.test(file.name)) {
@@ -129,17 +131,20 @@ export function ExcelTools({ speakers, lookups, onImported }: { speakers: Speake
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rows: speakerImportPayload(preview.rows) }),
       })
-      const result = await response.json() as { error?: string; summary?: ImportResultSummary }
-      if (result.summary) setSummary(formatImportSummary(result.summary))
+      const result = await response.json() as { error?: string; summary?: SpeakerImportResultSummary }
+      if (result.summary) {
+        setResultSummary(result.summary)
+        setResultError(result.error ?? "")
+      }
       if (!response.ok) {
-        setError(result.error || "Import failed.")
+        if (result.summary) setPreview(null)
+        else setError(result.error || "Import failed.")
         return
       }
       if (!result.summary) {
         setError("The import response did not include a summary.")
         return
       }
-      if (result.summary.errors.length) setError(`${result.summary.errors.length} row-level database or validation issue(s) remain. Download the preview error report for details.`)
       setPreview(null)
       onImported()
     } catch (caught) {
@@ -150,14 +155,22 @@ export function ExcelTools({ speakers, lookups, onImported }: { speakers: Speake
   }
 
   const detailedIssues = preview ? (showAllErrors ? preview.issues : preview.issues.slice(0, 10)) : []
+  const resultPresentation = resultSummary ? classifySpeakerImportResult(resultSummary) : null
 
   return (
     <>
       <button type="button" onClick={exportSpeakers} className="h-10 rounded-[var(--radius-button)] border border-[var(--border)] bg-white px-4 text-sm font-semibold">Export speakers</button>
       <label className="inline-flex h-10 cursor-pointer items-center rounded-[var(--radius-button)] border border-[var(--border)] bg-white px-4 text-sm font-semibold">Import speakers<input type="file" accept=".xlsx,.xls" className="sr-only" onChange={(event) => void chooseFile(event.target.files?.[0])} /></label>
       <button type="button" onClick={downloadTemplate} className="h-10 rounded-[var(--radius-button)] border border-[var(--border)] bg-white px-4 text-sm font-semibold">Download template</button>
-      {error && <p role="alert" className="basis-full text-sm text-[var(--error)]">{error}</p>}
-      {summary && <p role="status" className="basis-full text-sm text-[var(--green-700)]">Import result: {summary}</p>}
+      {error && <p role="alert" className="basis-full rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">{error}</p>}
+      {resultSummary && resultPresentation && <div role={resultPresentation.tone === "red" ? "alert" : "status"} className={`basis-full rounded-lg border p-4 text-sm ${resultToneClass[resultPresentation.tone]}`}>
+        <p className="font-bold">{resultPresentation.title}</p>
+        <p className="mt-1">{resultPresentation.message}</p>
+        <p className="mt-2 text-xs leading-5">{formatImportSummary(resultSummary)}</p>
+        {resultError && <p className="mt-2 text-xs font-semibold">{resultError}</p>}
+        {resultPresentation.failedReviewCount > 0 && <button type="button" onClick={() => setReviewResult((value) => !value)} className="mt-3 rounded-[var(--radius-button)] border border-current/30 bg-white/70 px-3 py-2 text-xs font-bold">{reviewResult ? "Hide failed rows" : `Review ${resultPresentation.failedReviewCount} failed ${resultPresentation.failedReviewCount === 1 ? "row" : "rows"}`}</button>}
+        {reviewResult && resultSummary.errors.length > 0 && <div className="mt-3 max-h-48 overflow-auto rounded border border-current/20 bg-white/70 p-3"><ul className="space-y-2 text-xs">{resultSummary.errors.slice(0, 10).map((item, index) => <li key={`${item.row}-${item.field}-${index}`}><span className="font-semibold">Row {item.row} · {item.provider || "Unknown provider"} · {item.field}:</span> {item.reason}</li>)}</ul>{resultSummary.errors.length > 10 && <p className="mt-2 font-semibold">Showing 10 of {resultSummary.errors.length} issues.</p>}<button type="button" onClick={() => downloadErrorReport(resultSummary.errors, "speaker-import-failed-rows.csv")} className="mt-3 font-bold underline">Download full CSV</button></div>}
+      </div>}
       {preview && (
         <div className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-[var(--navy-950)]/40 p-3 sm:p-6" role="dialog" aria-modal="true" aria-labelledby="excel-preview-title">
           <div className="my-auto flex max-h-[94vh] w-full max-w-[min(96vw,1500px)] flex-col overflow-hidden rounded-[var(--radius-card-lg)] bg-white shadow-[var(--shadow-lg)]">

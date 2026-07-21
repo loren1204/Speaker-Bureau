@@ -8,22 +8,12 @@ import {
   type SpeakerImportExistingSpeaker,
   type SpeakerImportIssue,
   type SpeakerImportLookups,
+  type SpeakerImportResultSummary,
   type SpeakerImportRow,
 } from "@/lib/speakerImport"
 import type { Json } from "@/types/database"
 
 interface LookupRow { id: number; name: string }
-
-interface ImportSummary {
-  speakersMatched: number
-  speakersInserted: number
-  speakersUpdated: number
-  seminarsInserted: number
-  seminarsMatched: number
-  seminarsSkipped: number
-  rowsFailed: number
-  errors: SpeakerImportIssue[]
-}
 
 function databaseIssue(row: SpeakerImportRow, reason: string): SpeakerImportIssue {
   return {
@@ -77,14 +67,17 @@ export async function POST(request: Request) {
     const categoryIds = lookupIdMap(categoryRows)
     const departmentIds = lookupIdMap(departmentRows)
     const statusIds = lookupIdMap(statusRows)
-    const summary: ImportSummary = {
+    const summary: SpeakerImportResultSummary = {
       speakersMatched: 0,
       speakersInserted: 0,
       speakersUpdated: 0,
       seminarsInserted: 0,
       seminarsMatched: 0,
-      seminarsSkipped: preview.summary.duplicateSeminarRows,
-      rowsFailed: preview.summary.invalidRows,
+      seminarsUpdated: 0,
+      duplicateRowsSkipped: preview.summary.duplicateSeminarRows,
+      invalidRows: preview.summary.invalidRows,
+      databaseFailures: 0,
+      validCandidateRows: preview.summary.validRows,
       errors: preview.issues.filter((item) => item.willSkip),
     }
 
@@ -114,7 +107,7 @@ export async function POST(request: Request) {
         }
       } catch (caught) {
         const reason = caught instanceof Error ? caught.message : "Speaker matching or insertion failed."
-        summary.rowsFailed += readyRows.length
+        summary.databaseFailures += readyRows.length
         summary.errors.push(...readyRows.map((row) => databaseIssue(row, reason)))
         continue
       }
@@ -139,7 +132,7 @@ export async function POST(request: Request) {
       }))
       const { error } = await admin.from("seminars").insert(payload)
       if (error) {
-        summary.rowsFailed += seminarsToInsert.length
+        summary.databaseFailures += seminarsToInsert.length
         summary.errors.push(...seminarsToInsert.map((row) => databaseIssue(row, error.message)))
       } else {
         summary.seminarsInserted += seminarsToInsert.length
@@ -152,8 +145,11 @@ export async function POST(request: Request) {
       speakersUpdated: summary.speakersUpdated,
       seminarsInserted: summary.seminarsInserted,
       seminarsMatched: summary.seminarsMatched,
-      seminarsSkipped: summary.seminarsSkipped,
-      rowsFailed: summary.rowsFailed,
+      seminarsUpdated: summary.seminarsUpdated,
+      duplicateRowsSkipped: summary.duplicateRowsSkipped,
+      invalidRows: summary.invalidRows,
+      databaseFailures: summary.databaseFailures,
+      validCandidateRows: summary.validCandidateRows,
       errors: summary.errors.map((item) => ({ row: item.row, provider: item.provider, field: item.field, sourceValue: item.sourceValue, reason: item.reason })),
     }
     await recordActivity({
@@ -161,13 +157,17 @@ export async function POST(request: Request) {
       actionType: "excel_import_completed",
       entityType: "import",
       targetLabel: `${body.rows.length} Master rows`,
-      description: `${profile.full_name || profile.email || "A team member"} completed a grouped speaker import: ${summary.speakersInserted} speakers and ${summary.seminarsInserted} seminars inserted; ${summary.rowsFailed} rows failed.`,
+      description: `${profile.full_name || profile.email || "A team member"} completed a grouped speaker import: ${summary.speakersInserted} speakers and ${summary.seminarsInserted} seminars inserted; ${summary.invalidRows} invalid rows and ${summary.databaseFailures} database failures.`,
       metadata: activityMetadata,
     })
 
-    const writeCount = summary.speakersInserted + summary.speakersUpdated + summary.seminarsInserted
-    if (writeCount === 0 && summary.rowsFailed > 0) {
-      return Response.json({ error: "No records were written because all candidate rows failed validation or database processing.", summary }, { status: 422 })
+    if (summary.validCandidateRows === 0) {
+      return Response.json({ error: "No valid candidate rows were available for import.", summary }, { status: 422 })
+    }
+    const processedSeminars = summary.seminarsMatched + summary.seminarsInserted + summary.seminarsUpdated
+    const processedRecords = summary.speakersMatched + summary.speakersInserted + summary.speakersUpdated + processedSeminars
+    if (processedRecords === 0 && summary.databaseFailures >= summary.validCandidateRows) {
+      return Response.json({ error: "Database processing failed for every valid candidate row.", summary }, { status: 500 })
     }
     return Response.json({ summary })
   } catch (error) {

@@ -12,10 +12,19 @@ import { ExcelTools } from "@/components/portal/ExcelTools"
 type Lookup = { categories: { category_id: number; name: string }[]; departments: { department_id: number; name: string }[]; statuses: { status_id: number; label: string }[] }
 const emptyLookup: Lookup = { categories: [], departments: [], statuses: [] }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className="block text-sm font-semibold text-[var(--navy-950)]">{label}{children}</label> }
+function Field({ label, required = false, children }: { label: string; required?: boolean; children: React.ReactNode }) { return <label className="block text-sm font-semibold text-[var(--navy-950)]">{label} <span className="font-normal text-[var(--text-muted)]">({required ? "required" : "optional"})</span>{children}</label> }
 const fieldClass = "mt-2 h-11 w-full rounded-[var(--radius-input)] border border-[var(--border)] bg-white px-3 outline-none focus:border-[var(--blue-600)] focus:ring-2 focus:ring-[var(--blue-600)]/20"
 
-function SpeakerEditor({ speaker, lookup, onClose, onSaved }: { speaker: Speaker | null; lookup: Lookup; onClose: () => void; onSaved: () => void }) {
+interface SpeakerSaveResponse {
+  speaker?: Speaker
+  partial?: boolean
+  message?: string
+  error?: string
+  code?: string | null
+  operation?: string
+}
+
+function SpeakerEditor({ speaker, lookup, onClose, onSaved }: { speaker: Speaker | null; lookup: Lookup; onClose: () => void; onSaved: (savedSpeaker?: Speaker) => void }) {
   const [form, setForm] = useState({ full_name: speaker?.full_name ?? "", credentials: speaker?.credentials ?? "", email: speaker?.email ?? "", title: speaker?.title ?? "", contact_info: speaker?.contact_info ?? "", bio: speaker?.bio ?? "", is_active: speaker?.is_active ?? true, seminar_title: "", seminar_description: "", category_id: "", department_id: "", status_id: "" })
   const [seminar, setSeminar] = useState<Partial<Seminar> | null>(null)
   const [saving, setSaving] = useState(false)
@@ -23,12 +32,46 @@ function SpeakerEditor({ speaker, lookup, onClose, onSaved }: { speaker: Speaker
   const [error, setError] = useState("")
 
   async function saveSpeaker(event: FormEvent) {
-    event.preventDefault(); setSaving(true); setError(""); setMessage("")
-    const response = await fetch(speaker ? `/api/admin/speakers/${speaker.speaker_id}` : "/api/admin/speakers", { method: speaker ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(form) })
-    const result = await response.json()
-    if (!response.ok) setError(result.error || "Speaker could not be saved.")
-    else { setMessage("Speaker saved."); onSaved() }
-    setSaving(false)
+    event.preventDefault()
+    if (saving) return
+    setSaving(true); setError(""); setMessage("")
+    const payload = {
+      full_name: form.full_name,
+      credentials: form.credentials,
+      email: form.email,
+      title: form.title,
+      contact_info: form.contact_info,
+      bio: form.bio,
+      is_active: form.is_active,
+      seminar_title: form.seminar_title,
+      seminar_description: form.seminar_description,
+      category_id: form.category_id || null,
+      department_id: form.department_id || null,
+      status_id: form.status_id || null,
+    }
+    try {
+      const response = await fetch(speaker ? `/api/admin/speakers/${speaker.speaker_id}` : "/api/admin/speakers", { method: speaker ? "PATCH" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+      const result = await response.json().catch(() => ({ error: `The server returned an unreadable response (${response.status}).` })) as SpeakerSaveResponse
+      if (!response.ok) {
+        setError(result.error || `Speaker could not be saved (${response.status}).`)
+        return
+      }
+      if (!result.speaker) {
+        setError("The server reported success but did not return the created speaker.")
+        return
+      }
+      if (result.partial) {
+        setMessage("Speaker created. The first seminar still needs review.")
+        setError(result.error || "The speaker was created, but the first seminar could not be added.")
+      } else {
+        setMessage(result.message || (speaker ? "Speaker saved." : "Speaker created."))
+      }
+      onSaved(result.speaker)
+    } catch (caught) {
+      setError(caught instanceof Error ? `Speaker request failed: ${caught.message}` : "Speaker request failed before the server returned a response.")
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function uploadPhoto(file?: File) {
@@ -64,19 +107,19 @@ function SpeakerEditor({ speaker, lookup, onClose, onSaved }: { speaker: Speaker
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-5 shadow-[var(--shadow-lg)] sm:p-8">
         <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.14em] text-[var(--green-600)]">Speaker management</p><h2 id="speaker-editor-title" className="mt-2 text-2xl font-bold">{speaker ? `Edit ${speaker.full_name}` : "Add a speaker"}</h2></div><button type="button" onClick={onClose} className="grid h-10 w-10 place-items-center rounded-[var(--radius-input)] border border-[var(--border)]" aria-label="Close editor"><X className="h-5 w-5" /></button></div>
         <form onSubmit={saveSpeaker} className="mt-8 space-y-5">
-          <div className="grid gap-5 sm:grid-cols-2"><Field label="Full name"><input required value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} className={fieldClass} /></Field><Field label="Credentials"><input value={form.credentials} onChange={(event) => setForm({ ...form, credentials: event.target.value })} className={fieldClass} /></Field></div>
+          <div className="grid gap-5 sm:grid-cols-2"><Field label="Full name" required><input required value={form.full_name} onChange={(event) => setForm({ ...form, full_name: event.target.value })} className={fieldClass} /></Field><Field label="Credentials"><input value={form.credentials} onChange={(event) => setForm({ ...form, credentials: event.target.value })} className={fieldClass} /></Field></div>
           <div className="grid gap-5 sm:grid-cols-2"><Field label="Email"><input type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} className={fieldClass} /></Field><Field label="Title"><input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} className={fieldClass} /></Field></div>
           <Field label="Contact information"><input value={form.contact_info} onChange={(event) => setForm({ ...form, contact_info: event.target.value })} className={fieldClass} /></Field>
           <Field label="Biography"><textarea rows={5} value={form.bio} onChange={(event) => setForm({ ...form, bio: event.target.value })} className={`${fieldClass} h-auto resize-y py-3 leading-6`} /></Field>
           <label className="flex items-center gap-3 text-sm font-semibold"><input type="checkbox" checked={form.is_active} onChange={(event) => setForm({ ...form, is_active: event.target.checked })} className="h-4 w-4 accent-[var(--green-600)]" /> Available for requests</label>
-          {!speaker && <div className="rounded-[var(--radius-card-sm)] bg-[var(--canvas-subtle)] p-4"><p className="mb-4 text-sm font-bold">Optional first seminar</p><Field label="Seminar title"><input value={form.seminar_title} onChange={(event) => setForm({ ...form, seminar_title: event.target.value })} className={fieldClass} /></Field><div className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="Category"><select value={form.category_id} onChange={(event) => setForm({ ...form, category_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.categories.map((item) => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select></Field><Field label="Department"><select value={form.department_id} onChange={(event) => setForm({ ...form, department_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.departments.map((item) => <option key={item.department_id} value={item.department_id}>{item.name}</option>)}</select></Field><Field label="Status"><select value={form.status_id} onChange={(event) => setForm({ ...form, status_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.statuses.map((item) => <option key={item.status_id} value={item.status_id}>{item.label}</option>)}</select></Field></div></div>}
+          {!speaker && <div className="rounded-[var(--radius-card-sm)] bg-[var(--canvas-subtle)] p-4"><p className="mb-4 text-sm font-bold">Optional first seminar</p><Field label="Seminar title"><input value={form.seminar_title} onChange={(event) => setForm({ ...form, seminar_title: event.target.value })} className={fieldClass} /></Field><div className="mt-4"><Field label="Seminar description"><textarea rows={3} value={form.seminar_description} onChange={(event) => setForm({ ...form, seminar_description: event.target.value })} className={`${fieldClass} h-auto resize-y py-3`} /></Field></div><div className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="Category"><select value={form.category_id} onChange={(event) => setForm({ ...form, category_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.categories.map((item) => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select></Field><Field label="Department"><select value={form.department_id} onChange={(event) => setForm({ ...form, department_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.departments.map((item) => <option key={item.department_id} value={item.department_id}>{item.name}</option>)}</select></Field><Field label="Status"><select value={form.status_id} onChange={(event) => setForm({ ...form, status_id: event.target.value })} className={fieldClass}><option value="">None</option>{lookup.statuses.map((item) => <option key={item.status_id} value={item.status_id}>{item.label}</option>)}</select></Field></div></div>}
           {error && <p role="alert" className="text-sm text-[var(--error)]">{error}</p>}{message && <p role="status" className="text-sm text-[var(--green-700)]">{message}</p>}
-          <div className="flex flex-wrap gap-3"><button disabled={saving} className="h-11 rounded-[var(--radius-button)] bg-[var(--green-600)] px-5 text-sm font-bold text-white disabled:opacity-60">{saving ? "Saving…" : "Save changes"}</button>{speaker && <label className="inline-flex h-11 cursor-pointer items-center rounded-[var(--radius-button)] border border-[var(--border)] px-5 text-sm font-semibold">Replace photo<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => void uploadPhoto(event.target.files?.[0])} /></label>}{speaker && <button type="button" onClick={archive} className="h-11 rounded-[var(--radius-button)] px-4 text-sm font-semibold text-[var(--error)]">Archive speaker</button>}</div>
+          <div className="flex flex-wrap gap-3"><button disabled={saving} className="h-11 rounded-[var(--radius-button)] bg-[var(--green-600)] px-5 text-sm font-bold text-white disabled:opacity-60">{saving ? "Saving…" : speaker ? "Save changes" : "Add speaker"}</button>{speaker && <label className="inline-flex h-11 cursor-pointer items-center rounded-[var(--radius-button)] border border-[var(--border)] px-5 text-sm font-semibold">Replace photo<input type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={(event) => void uploadPhoto(event.target.files?.[0])} /></label>}{speaker && <button type="button" onClick={archive} className="h-11 rounded-[var(--radius-button)] px-4 text-sm font-semibold text-[var(--error)]">Archive speaker</button>}</div>
         </form>
 
         {speaker && <section className="mt-10 border-t border-[var(--border)] pt-8"><div className="flex items-center justify-between"><div><h3 className="text-lg font-bold">Seminars</h3><p className="mt-1 text-sm text-[var(--text-muted)]">Topics associated with this speaker.</p></div><button type="button" onClick={() => setSeminar({ title: "", description: "", category_id: null, department_id: null, status_id: null })} className="text-sm font-semibold text-[var(--green-700)]">Add seminar</button></div><div className="mt-4 space-y-2">{speaker.seminars?.length ? speaker.seminars.map((item) => <button key={item.seminar_id} type="button" onClick={() => setSeminar(item)} className="flex w-full items-start justify-between gap-4 rounded-[var(--radius-input)] border border-[var(--border)] p-4 text-left hover:bg-[var(--canvas-subtle)]"><span className="min-w-0"><span className="block font-semibold [overflow-wrap:anywhere]">{item.title}</span><span className="mt-1 block text-xs text-[var(--text-muted)]">{item.categories?.name || "No category"}</span></span><span className="shrink-0 text-sm font-semibold text-[var(--green-700)]">Edit</span></button>) : <p className="rounded-[var(--radius-input)] bg-[var(--canvas-subtle)] p-4 text-sm text-[var(--text-muted)]">No seminars yet.</p>}</div></section>}
 
-        {seminar && <form onSubmit={saveSeminar} className="mt-6 rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-[var(--canvas-subtle)] p-5"><h3 className="font-bold">{seminar.seminar_id ? "Edit seminar" : "Add seminar"}</h3><Field label="Title"><input required value={seminar.title ?? ""} onChange={(event) => setSeminar({ ...seminar, title: event.target.value })} className={fieldClass} /></Field><div className="mt-4"><Field label="Description"><textarea rows={4} value={seminar.description ?? ""} onChange={(event) => setSeminar({ ...seminar, description: event.target.value })} className={`${fieldClass} h-auto py-3`} /></Field></div><div className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="Category"><select value={seminar.category_id ?? ""} onChange={(event) => setSeminar({ ...seminar, category_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.categories.map((item) => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select></Field><Field label="Department"><select value={seminar.department_id ?? ""} onChange={(event) => setSeminar({ ...seminar, department_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.departments.map((item) => <option key={item.department_id} value={item.department_id}>{item.name}</option>)}</select></Field><Field label="Status"><select value={seminar.status_id ?? ""} onChange={(event) => setSeminar({ ...seminar, status_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.statuses.map((item) => <option key={item.status_id} value={item.status_id}>{item.label}</option>)}</select></Field></div><div className="mt-5 flex gap-3"><button disabled={saving} className="h-10 rounded-[var(--radius-button)] bg-[var(--green-600)] px-4 text-sm font-bold text-white">Save seminar</button><button type="button" onClick={() => setSeminar(null)} className="h-10 px-4 text-sm font-semibold">Cancel</button></div></form>}
+        {seminar && <form onSubmit={saveSeminar} className="mt-6 rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-[var(--canvas-subtle)] p-5"><h3 className="font-bold">{seminar.seminar_id ? "Edit seminar" : "Add seminar"}</h3><Field label="Title" required><input required value={seminar.title ?? ""} onChange={(event) => setSeminar({ ...seminar, title: event.target.value })} className={fieldClass} /></Field><div className="mt-4"><Field label="Description"><textarea rows={4} value={seminar.description ?? ""} onChange={(event) => setSeminar({ ...seminar, description: event.target.value })} className={`${fieldClass} h-auto py-3`} /></Field></div><div className="mt-4 grid gap-4 sm:grid-cols-3"><Field label="Category"><select value={seminar.category_id ?? ""} onChange={(event) => setSeminar({ ...seminar, category_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.categories.map((item) => <option key={item.category_id} value={item.category_id}>{item.name}</option>)}</select></Field><Field label="Department"><select value={seminar.department_id ?? ""} onChange={(event) => setSeminar({ ...seminar, department_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.departments.map((item) => <option key={item.department_id} value={item.department_id}>{item.name}</option>)}</select></Field><Field label="Status"><select value={seminar.status_id ?? ""} onChange={(event) => setSeminar({ ...seminar, status_id: event.target.value ? Number(event.target.value) : null })} className={fieldClass}><option value="">None</option>{lookup.statuses.map((item) => <option key={item.status_id} value={item.status_id}>{item.label}</option>)}</select></Field></div><div className="mt-5 flex gap-3"><button disabled={saving} className="h-10 rounded-[var(--radius-button)] bg-[var(--green-600)] px-4 text-sm font-bold text-white">Save seminar</button><button type="button" onClick={() => setSeminar(null)} className="h-10 px-4 text-sm font-semibold">Cancel</button></div></form>}
       </div>
     </div>
   )
@@ -153,7 +196,7 @@ export default function AdminSpeakersPage() {
       ) : (
         <div className="mt-6"><EmptyState title="No speakers found" description={speakers.length ? "Adjust the search or filters to see more records." : "No speaker records are currently available in Supabase."} /></div>
       )}
-      {editing !== undefined && <SpeakerEditor speaker={editing} lookup={lookup} onClose={() => setEditing(undefined)} onSaved={() => void load()} />}
+      {editing !== undefined && <SpeakerEditor speaker={editing} lookup={lookup} onClose={() => setEditing(undefined)} onSaved={(savedSpeaker) => { if (savedSpeaker) setEditing(savedSpeaker); void load() }} />}
     </div>
   )
 }
