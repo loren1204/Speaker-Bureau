@@ -4,6 +4,7 @@ import { recordActivity } from "@/lib/activity"
 
 const MIME_EXTENSIONS: Record<string, string> = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" }
 const MAX_SIZE = 5 * 1024 * 1024
+const PHOTO_BUCKET = "speaker-headshots"
 
 export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
   try {
@@ -18,9 +19,14 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
 
     const admin = createAdminClient()
     const path = `${speakerId}/profile.${extension}`
-    const { error: uploadError } = await admin.storage.from("speaker-photos").upload(path, file, { contentType: file.type, upsert: true, cacheControl: "3600" })
-    if (uploadError) return Response.json({ error: uploadError.message }, { status: 400 })
-    const { data: { publicUrl } } = admin.storage.from("speaker-photos").getPublicUrl(path)
+    const { error: uploadError } = await admin.storage.from(PHOTO_BUCKET).upload(path, file, { contentType: file.type, upsert: true, cacheControl: "3600" })
+    if (uploadError) {
+      const message = uploadError.message === "Bucket not found"
+        ? "Speaker photo storage is not configured. Ask an administrator to verify the speaker-headshots bucket."
+        : uploadError.message
+      return Response.json({ error: message }, { status: 400 })
+    }
+    const { data: { publicUrl } } = admin.storage.from(PHOTO_BUCKET).getPublicUrl(path)
     const stableUrl = `${publicUrl}?v=${Date.now()}`
     const { data, error } = await admin.from("speakers").update({ headshot_url: stableUrl }).eq("speaker_id", speakerId).select("full_name, headshot_url").single()
     if (error) return Response.json({ error: error.message }, { status: 400 })

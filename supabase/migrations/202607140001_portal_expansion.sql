@@ -157,8 +157,8 @@ using (public.is_stakeholder());
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values (
-  'speaker-photos',
-  'speaker-photos',
+  'speaker-headshots',
+  'speaker-headshots',
   true,
   5242880,
   array['image/jpeg', 'image/png', 'image/webp']
@@ -184,23 +184,23 @@ on conflict (id) do update set
 drop policy if exists "speaker_photos_public_read" on storage.objects;
 create policy "speaker_photos_public_read"
 on storage.objects for select to public
-using (bucket_id = 'speaker-photos');
+using (bucket_id = 'speaker-headshots');
 
 drop policy if exists "speaker_photos_team_insert" on storage.objects;
 create policy "speaker_photos_team_insert"
 on storage.objects for insert to authenticated
-with check (bucket_id = 'speaker-photos' and public.is_stakeholder());
+with check (bucket_id = 'speaker-headshots' and public.is_stakeholder());
 
 drop policy if exists "speaker_photos_team_update" on storage.objects;
 create policy "speaker_photos_team_update"
 on storage.objects for update to authenticated
-using (bucket_id = 'speaker-photos' and public.is_stakeholder())
-with check (bucket_id = 'speaker-photos' and public.is_stakeholder());
+using (bucket_id = 'speaker-headshots' and public.is_stakeholder())
+with check (bucket_id = 'speaker-headshots' and public.is_stakeholder());
 
 drop policy if exists "speaker_photos_team_delete" on storage.objects;
 create policy "speaker_photos_team_delete"
 on storage.objects for delete to authenticated
-using (bucket_id = 'speaker-photos' and public.is_stakeholder());
+using (bucket_id = 'speaker-headshots' and public.is_stakeholder());
 
 drop policy if exists "team_avatars_public_read" on storage.objects;
 create policy "team_avatars_public_read"
