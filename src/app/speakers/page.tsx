@@ -99,21 +99,21 @@ export default function SpeakersPage() {
         <section className="py-12 sm:py-16" aria-labelledby="directory-heading">
           <Container>
             <div className="grid gap-8 xl:grid-cols-[minmax(250px,330px)_minmax(0,1fr)] xl:items-start">
-              <aside className="rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-[var(--canvas-subtle)] p-5 sm:p-6 xl:sticky xl:top-28">
+              <aside className="rounded-[var(--radius-card-lg)] border border-[var(--blue-600)] bg-[var(--blue-600)] p-5 text-white shadow-[var(--shadow-md)] sm:p-6 xl:sticky xl:top-28">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <h2 className="text-lg font-bold text-[var(--navy-950)]">Browse categories</h2>
-                    <p className="mt-1 text-sm text-[var(--text-muted)]">Select one or more topics.</p>
+                    <h2 className="text-lg font-bold text-white">Browse categories</h2>
+                    <p className="mt-1 text-sm text-white/80">Select one or more topics.</p>
                   </div>
-                  {selectedCategories.length > 0 && <button type="button" onClick={() => { setSelectedCategories([]); setVisibleCount(PAGE_SIZE) }} className="text-sm font-semibold text-[var(--green-700)] hover:underline">Clear</button>}
+                  {selectedCategories.length > 0 && <button type="button" onClick={() => { setSelectedCategories([]); setVisibleCount(PAGE_SIZE) }} className="text-sm font-semibold text-white hover:underline">Clear</button>}
                 </div>
                 <div className="mt-5">
                   <CategoryFilterGrid categories={categoryOptions} selected={selectedCategories} onToggle={toggleCategory} />
                 </div>
-                <p className="mt-5 border-t border-[var(--border)] pt-4 text-sm text-[var(--text-muted)]">Showing all departments</p>
-                <label className="mt-4 block text-sm font-semibold text-[var(--navy-950)]">
+                <p className="mt-5 border-t border-white/25 pt-4 text-sm text-white/80">Showing all departments</p>
+                <label className="mt-4 block text-sm font-semibold text-white">
                   Availability
-                  <select value={availability} onChange={(event) => { setAvailability(event.target.value as typeof availability); setVisibleCount(PAGE_SIZE) }} className="mt-2 h-11 w-full rounded-[var(--radius-input)] border border-[var(--border)] bg-white px-3 text-sm outline-none focus:border-[var(--blue-600)] focus:ring-2 focus:ring-[var(--blue-600)]/20">
+                  <select value={availability} onChange={(event) => { setAvailability(event.target.value as typeof availability); setVisibleCount(PAGE_SIZE) }} className="mt-2 h-11 w-full rounded-[var(--radius-input)] border border-[var(--border)] bg-white px-3 text-sm text-[var(--navy-950)] outline-none focus:border-[var(--blue-600)] focus:ring-2 focus:ring-white/50">
                     <option value="all">All availability</option>
                     <option value="available">Available</option>
                     <option value="limited">Limited</option>

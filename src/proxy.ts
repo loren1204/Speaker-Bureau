@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import type { NextRequest } from "next/server"
 
 export async function proxy(req: NextRequest) {
-  const res = NextResponse.next()
+  let res = NextResponse.next({ request: req })
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -12,9 +12,9 @@ export async function proxy(req: NextRequest) {
       cookies: {
         getAll() { return req.cookies.getAll() },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            res.cookies.set(name, value, options)
-          )
+          cookiesToSet.forEach(({ name, value }) => req.cookies.set(name, value))
+          res = NextResponse.next({ request: req })
+          cookiesToSet.forEach(({ name, value, options }) => res.cookies.set(name, value, options))
         },
       },
     }
@@ -24,13 +24,15 @@ export async function proxy(req: NextRequest) {
 
   if (!user && req.nextUrl.pathname.startsWith("/admin")) {
     const redirectUrl = new URL("/login", req.url)
-    redirectUrl.searchParams.set("next", req.nextUrl.pathname)
-    return NextResponse.redirect(redirectUrl)
+    redirectUrl.searchParams.set("next", `${req.nextUrl.pathname}${req.nextUrl.search}`)
+    const redirectResponse = NextResponse.redirect(redirectUrl)
+    res.cookies.getAll().forEach((cookie) => redirectResponse.cookies.set(cookie))
+    return redirectResponse
   }
 
   return res
 }
 
 export const config = {
-  matcher: ["/admin/:path*"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)"],
 }

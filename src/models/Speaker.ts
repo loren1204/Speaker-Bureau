@@ -2,6 +2,8 @@ export interface Seminar {
   seminar_id: number
   speaker_id?: number | null
   department_id?: number | null
+  /** Exact display label accepted from team forms and spreadsheet imports. */
+  department?: string | null
   category_id?: number | null
   status_id?: number | null
   title: string

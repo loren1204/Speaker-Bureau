@@ -25,7 +25,7 @@ export default function OverviewPage() {
       </div>
       <div className="mt-8 grid gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.72fr)]">
         <div><div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-bold">Recent activity</h2><Link href="/admin/activity" className="text-sm font-semibold text-[var(--green-700)] hover:underline">View all</Link></div><ActivityFeed compact /></div>
-        <div><h2 className="mb-4 text-xl font-bold">Profile and notifications</h2><ProfileSettings /></div>
+        <div id="profile-settings" className="scroll-mt-24"><h2 className="mb-4 text-xl font-bold">Profile and notifications</h2><ProfileSettings /></div>
       </div>
     </div>
   )

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
 import { Menu, X } from "lucide-react"
 import { LinkButton } from "@/components/design-system/ui/Button"
+import { useAuth } from "@/context/AuthContext"
 
 const NAV_LINKS = [
   { label: "Speakers", href: "/speakers" },
@@ -33,9 +34,16 @@ interface SiteHeaderProps {
 export function SiteHeader({ activeHrefOverride }: SiteHeaderProps) {
   const pathname = usePathname()
   const [menuOpen, setMenuOpen] = useState(false)
+  const { user, isStakeholder } = useAuth()
+  const isTeamMember = Boolean(user && isStakeholder)
+  const teamLinkLabel = isTeamMember
+    ? pathname.startsWith("/speakers") ? "Return to Team Dashboard" : "Team Dashboard"
+    : "Team login"
+  const teamLinkHref = isTeamMember ? "/admin" : "/login"
 
   useEffect(() => {
-    setMenuOpen(false)
+    const handle = window.setTimeout(() => setMenuOpen(false), 0)
+    return () => window.clearTimeout(handle)
   }, [pathname])
 
   return (
@@ -83,8 +91,8 @@ export function SiteHeader({ activeHrefOverride }: SiteHeaderProps) {
         </nav>
 
         <div className="flex items-center justify-self-end gap-3">
-          <Link href="/login" className="hidden text-sm font-semibold text-[var(--navy-800)] hover:text-[var(--green-600)] lg:block">
-            Team login
+          <Link href={teamLinkHref} className={`hidden text-sm font-semibold lg:block ${isTeamMember ? "rounded-[var(--radius-button)] bg-[var(--mint-100)] px-3 py-2 text-[var(--green-700)]" : "text-[var(--navy-800)] hover:text-[var(--green-600)]"}`}>
+            {teamLinkLabel}
           </Link>
           <div className="hidden sm:block">
             <LinkButton href="/partners" size="md">
@@ -133,7 +141,7 @@ export function SiteHeader({ activeHrefOverride }: SiteHeaderProps) {
                 )
               })}
               <div className="mt-2 border-t border-[var(--border)] pt-3">
-                <Link href="/login" className="mb-2 flex min-h-11 items-center px-4 text-sm font-semibold text-[var(--navy-800)]">Team login</Link>
+                <Link href={teamLinkHref} className={`mb-2 flex min-h-11 items-center rounded-[var(--radius-input)] px-4 text-sm font-semibold ${isTeamMember ? "bg-[var(--mint-100)] text-[var(--green-700)]" : "text-[var(--navy-800)]"}`}>{teamLinkLabel}</Link>
                 <LinkButton href="/partners" size="md" className="w-full">
                   Request a Speaker
                 </LinkButton>

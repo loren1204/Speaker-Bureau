@@ -67,6 +67,18 @@ export async function POST(request: Request) {
     const categoryIds = lookupIdMap(categoryRows)
     const departmentIds = lookupIdMap(departmentRows)
     const statusIds = lookupIdMap(statusRows)
+
+    const incomingDepartments = new Map(preview.rows
+      .filter((row) => !speakerImportRowWillBeSkipped(row) && row.department)
+      .map((row) => [normalizeSpeakerImportKey(row.department), row.department]))
+    for (const [key, name] of incomingDepartments) {
+      if (departmentIds.has(key)) continue
+      const { data, error } = await admin.from("departments").insert({ name }).select("department_id").single()
+      if (error) {
+        return Response.json({ error: `Department “${name}” could not be saved: ${error.message}` }, { status: 500 })
+      }
+      departmentIds.set(key, data.department_id)
+    }
     const summary: SpeakerImportResultSummary = {
       speakersMatched: 0,
       speakersInserted: 0,

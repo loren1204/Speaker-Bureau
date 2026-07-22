@@ -72,13 +72,13 @@ export function ExcelTools({ speakers, lookups, onImported }: { speakers: Speake
   function exportSpeakers() {
     const rows = speakers.flatMap((speaker) => {
       const seminars = speaker.seminars?.length ? speaker.seminars : [null]
-      return seminars.map((seminar) => ({ "Speaker ID": speaker.speaker_id, "Full Name": speaker.full_name, Credentials: speaker.credentials ?? "", Email: speaker.email ?? "", "Contact Info": speaker.contact_info ?? "", Availability: speaker.is_active ? "Available" : "Limited", "Photo URL": speaker.headshot_url ?? "", "Seminar Title": seminar?.title ?? "", "Seminar Description": seminar?.description ?? "", Category: seminar?.categories?.name ?? "", Department: seminar?.departments?.name ?? "", Status: seminar?.statuses?.label ?? "" }))
+      return seminars.map((seminar) => ({ "Speaker ID": speaker.speaker_id, "Full Name": speaker.full_name, Credentials: speaker.credentials ?? "", Email: speaker.email ?? "", "Contact Info": speaker.contact_info ?? "", Availability: speaker.is_active ? "Available" : "Limited", "Photo URL": speaker.headshot_url ?? "", "Seminar Title": seminar?.title ?? "", "Seminar Description": seminar?.description ?? "", Category: seminar?.categories?.name ?? "", Department: seminar?.department ?? seminar?.departments?.name ?? "", Status: seminar?.statuses?.label ?? "" }))
     })
     downloadWorkbook(rows, `lee-health-speakers-${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
   function downloadTemplate() {
-    downloadWorkbook([{ Provider: "Lastname, Firstname", Credentials: "MD", Department: lookups.departments[0]?.name ?? "", Category: lookups.categories[0]?.name ?? "", Status: lookups.statuses[0]?.label ?? "Active", Seminars: "One complete seminar title", Description: "Description for this seminar" }], "lee-health-speaker-import-template.xlsx", IMPORT_TEMPLATE_HEADERS)
+    downloadWorkbook([{ Provider: "Lastname, Firstname", Credentials: "MD", Department: "Exact department or organization", Category: lookups.categories[0]?.name ?? "", Status: lookups.statuses[0]?.label ?? "Active", Seminars: "One complete seminar title", Description: "Description for this seminar" }], "lee-health-speaker-import-template.xlsx", IMPORT_TEMPLATE_HEADERS)
   }
 
   async function chooseFile(file?: File) {
@@ -163,7 +163,7 @@ export function ExcelTools({ speakers, lookups, onImported }: { speakers: Speake
       <label className="inline-flex h-10 cursor-pointer items-center rounded-[var(--radius-button)] border border-[var(--border)] bg-white px-4 text-sm font-semibold">Import speakers<input type="file" accept=".xlsx,.xls" className="sr-only" onChange={(event) => void chooseFile(event.target.files?.[0])} /></label>
       <button type="button" onClick={downloadTemplate} className="h-10 rounded-[var(--radius-button)] border border-[var(--border)] bg-white px-4 text-sm font-semibold">Download template</button>
       {error && <p role="alert" className="basis-full rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">{error}</p>}
-      {resultSummary && resultPresentation && <div role={resultPresentation.tone === "red" ? "alert" : "status"} className={`basis-full rounded-lg border p-4 text-sm ${resultToneClass[resultPresentation.tone]}`}>
+      {resultSummary && resultPresentation && <div role={resultPresentation.tone === "red" ? "alert" : "status"} className={`w-full min-w-0 max-w-full basis-full whitespace-normal rounded-lg border p-4 text-sm [overflow-wrap:break-word] [word-break:normal] ${resultToneClass[resultPresentation.tone]}`}>
         <p className="font-bold">{resultPresentation.title}</p>
         <p className="mt-1">{resultPresentation.message}</p>
         <p className="mt-2 text-xs leading-5">{formatImportSummary(resultSummary)}</p>
@@ -192,7 +192,7 @@ export function ExcelTools({ speakers, lookups, onImported }: { speakers: Speake
                   ["Valid rows", preview.summary.validRows],
                   ["Invalid rows", preview.summary.invalidRows],
                   ["Duplicate seminars", preview.summary.duplicateSeminarRows],
-                  ["Unmatched departments", preview.summary.unmatchedDepartments],
+                  ["Departments accepted as entered", preview.summary.distinctDepartments],
                   ["Unmatched categories", preview.summary.unmatchedCategories],
                   ["Unmatched statuses", preview.summary.unmatchedStatuses],
                 ].map(([label, value]) => <div key={label} className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--canvas-subtle)] p-3"><p className="text-xs text-[var(--text-muted)]">{label}</p><p className="mt-1 text-xl font-bold">{value}</p></div>)}

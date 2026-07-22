@@ -14,7 +14,7 @@ export const REQUIRED_SPEAKER_IMPORT_COLUMNS = ["Provider", "Department", "Categ
 export const OPTIONAL_SPEAKER_IMPORT_COLUMNS = ["Credentials", "Status", "Description"] as const
 
 type ImportField = (typeof SPEAKER_IMPORT_HEADER_MAP)[keyof typeof SPEAKER_IMPORT_HEADER_MAP]
-type LookupField = "department" | "category" | "status"
+type LookupField = "category" | "status"
 
 export interface SpeakerImportLookups {
   categories: string[]
@@ -87,7 +87,7 @@ export interface SpeakerImportSummary {
   validRows: number
   invalidRows: number
   duplicateSeminarRows: number
-  unmatchedDepartments: number
+  distinctDepartments: number
   unmatchedCategories: number
   unmatchedStatuses: number
 }
@@ -145,15 +145,10 @@ const MAX_LENGTHS: Partial<Record<ImportField, number>> = {
 }
 
 const LOOKUP_ALIASES: Record<LookupField, Record<string, string>> = {
-  department: {
-    cardilogy: "Cardiology",
-    opthalmology: "Ophthalmology",
-    pulmanology: "Pulmonology",
-    "rehabilitation sevices": "Rehabilitation Services",
-  },
   category: {
     "integrative&lifestyle&mental": "Integrative/Lifestyle",
     "integrative,lifestyle,mental": "Integrative/Lifestyle",
+    specialist: "Specialists",
   },
   status: {},
 }
@@ -190,7 +185,6 @@ function createIssue(
 }
 
 function lookupValues(field: LookupField, lookups: SpeakerImportLookups) {
-  if (field === "department") return lookups.departments
   if (field === "category") return lookups.categories
   return lookups.statuses
 }
@@ -259,15 +253,14 @@ function validateAndResolveRow(source: SpeakerImportPayloadRow, lookups: Speaker
     }
   }
 
-  const department = resolveLookup(source, "department", source.department || null, lookups)
   const category = resolveLookup(source, "category", source.category || null, lookups)
   const status = resolveLookup(source, "status", source.status, lookups)
-  for (const result of [department, category, status]) if (result.issue) issues.push(result.issue)
+  for (const result of [category, status]) if (result.issue) issues.push(result.issue)
 
   return {
     ...source,
     providerKey: normalizeSpeakerImportKey(source.providerName),
-    resolvedDepartment: department.value,
+    resolvedDepartment: source.department || null,
     resolvedCategory: category.value,
     resolvedStatus: status.value,
     duplicateOfRow: null,
@@ -405,7 +398,7 @@ export function buildSpeakerImportPreview(
       validRows: rows.filter((row) => !fatalRows.has(row.sourceRow) && row.duplicateOfRow === null).length,
       invalidRows: fatalRows.size,
       duplicateSeminarRows,
-      unmatchedDepartments: unmatched("Department"),
+      distinctDepartments: new Set(rows.flatMap((row) => row.department ? [normalizeSpeakerImportKey(row.department)] : [])).size,
       unmatchedCategories: unmatched("Category"),
       unmatchedStatuses: unmatched("Status"),
     },

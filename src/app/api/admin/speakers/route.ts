@@ -3,6 +3,7 @@ import { authErrorResponse, requireTeamMember } from "@/lib/auth/server"
 import { cleanEmail, cleanText } from "@/lib/validation"
 import { recordActivity } from "@/lib/activity"
 import { normalizeSpeakerRecords } from "@/lib/speakerPresentation"
+import { findOrCreateDepartment } from "@/lib/departments"
 
 interface DatabaseError {
   code?: string
@@ -60,12 +61,12 @@ export async function POST(request: Request) {
 
     const seminarTitle = cleanText(body.seminar_title, 500)
     const seminarDescription = cleanText(body.seminar_description, 5000) || null
+    const departmentLabel = cleanText(body.department, 100) || null
     const categoryId = optionalLookupId(body.category_id, "Category")
-    const departmentId = optionalLookupId(body.department_id, "Department")
     const statusId = optionalLookupId(body.status_id, "Status")
-    const lookupError = categoryId.error || departmentId.error || statusId.error
+    const lookupError = categoryId.error || statusId.error
     if (lookupError) return Response.json({ error: lookupError, operation: "validation" }, { status: 400 })
-    if (!seminarTitle && (seminarDescription || categoryId.value || departmentId.value || statusId.value)) {
+    if (!seminarTitle && (seminarDescription || departmentLabel || categoryId.value || statusId.value)) {
       return Response.json({ error: "A seminar title is required when seminar details or lookup values are provided.", operation: "validation" }, { status: 400 })
     }
 
@@ -83,15 +84,13 @@ export async function POST(request: Request) {
     }
 
     if (seminarTitle) {
-      const [category, department, status] = await Promise.all([
+      const [category, status] = await Promise.all([
         categoryId.value ? admin.from("categories").select("category_id").eq("category_id", categoryId.value).maybeSingle() : Promise.resolve({ data: null, error: null }),
-        departmentId.value ? admin.from("departments").select("department_id").eq("department_id", departmentId.value).maybeSingle() : Promise.resolve({ data: null, error: null }),
         statusId.value ? admin.from("statuses").select("status_id").eq("status_id", statusId.value).maybeSingle() : Promise.resolve({ data: null, error: null }),
       ])
-      const lookupDatabaseError = category.error || department.error || status.error
+      const lookupDatabaseError = category.error || status.error
       if (lookupDatabaseError) return databaseErrorResponse("Seminar lookup validation", lookupDatabaseError, 500)
       if (categoryId.value && !category.data) return Response.json({ error: `Category ID ${categoryId.value} does not exist.`, operation: "validation" }, { status: 400 })
-      if (departmentId.value && !department.data) return Response.json({ error: `Department ID ${departmentId.value} does not exist.`, operation: "validation" }, { status: 400 })
       if (statusId.value && !status.data) return Response.json({ error: `Status ID ${statusId.value} does not exist.`, operation: "validation" }, { status: 400 })
     }
 
@@ -110,12 +109,21 @@ export async function POST(request: Request) {
 
     let seminar = null
     if (seminarTitle) {
+      const department = await findOrCreateDepartment(admin, departmentLabel)
+      if (department.error) {
+        return Response.json({
+          error: `Speaker “${fullName}” was created, but department “${departmentLabel}” could not be saved: ${department.error}`,
+          operation: "Department insert",
+          partial: true,
+          speaker,
+        }, { status: 207 })
+      }
       const { data: seminarData, error: seminarError } = await admin.from("seminars").insert({
         speaker_id: speaker.speaker_id,
         title: seminarTitle,
         description: seminarDescription,
         category_id: categoryId.value,
-        department_id: departmentId.value,
+        department_id: department.id,
         status_id: statusId.value,
       }).select("*").single()
       if (seminarError) {

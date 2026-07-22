@@ -7,6 +7,11 @@ import { FormEvent, useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/context/AuthContext"
 
+function requestedTeamDestination() {
+  const requested = new URLSearchParams(window.location.search).get("next")
+  return requested === "/admin" || requested?.startsWith("/admin/") ? requested : "/admin"
+}
+
 export default function LoginPage() {
   const [mode, setMode] = useState<"login" | "forgot">("login")
   const [email, setEmail] = useState("")
@@ -19,7 +24,7 @@ export default function LoginPage() {
   const router = useRouter()
 
   useEffect(() => {
-    if (!authLoading && user && isStakeholder) router.replace("/admin")
+    if (!authLoading && user && isStakeholder) router.replace(requestedTeamDestination())
   }, [authLoading, isStakeholder, router, user])
 
   async function handleLogin(event: FormEvent) {
@@ -32,7 +37,7 @@ export default function LoginPage() {
       setSubmitting(false)
       return
     }
-    router.replace("/admin")
+    router.replace(requestedTeamDestination())
     router.refresh()
   }
 

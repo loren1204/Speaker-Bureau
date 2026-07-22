@@ -36,6 +36,7 @@ function normalizeSeminar(value: unknown): NonNullable<Speaker["seminars"]>[numb
     seminar_id: seminarId,
     speaker_id: integer(value.speaker_id),
     department_id: integer(value.department_id),
+    department: text(value.department) ?? (department ? text(department.name) : null),
     category_id: integer(value.category_id),
     status_id: integer(value.status_id),
     title,
@@ -144,7 +145,8 @@ export function getCategoryName(speaker: Partial<Speaker>): string {
 }
 
 export function getDepartmentName(speaker: Partial<Speaker>): string {
-  return getFirstSeminar(speaker)?.departments?.name ?? ""
+  const seminar = getFirstSeminar(speaker)
+  return seminar?.department ?? seminar?.departments?.name ?? ""
 }
 
 export function getStatusName(speaker: Partial<Speaker>): string {
