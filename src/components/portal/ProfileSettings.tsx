@@ -15,6 +15,8 @@ export function ProfileSettings() {
   const [error, setError] = useState("")
 
   useEffect(() => {
+    // The authenticated profile arrives asynchronously and initializes this editable local form.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setName(profile?.full_name ?? "")
     setTitle(profile?.title ?? "")
     setNotifications(profile?.notifications_enabled ?? true)
@@ -28,8 +30,16 @@ export function ProfileSettings() {
     const result = await response.json()
     if (!response.ok) setError(result.error || "Profile could not be saved.")
     else {
-      setMessage("Profile saved.")
-      if (notifications && typeof Notification !== "undefined" && Notification.permission === "default") await Notification.requestPermission()
+      let successMessage = "Profile saved."
+      if (notifications && typeof Notification !== "undefined" && Notification.permission === "default") {
+        try {
+          const permission = await Notification.requestPermission()
+          if (permission !== "granted") successMessage = "Profile saved. Browser notifications were not enabled."
+        } catch {
+          successMessage = "Profile saved. Browser notification permission could not be requested."
+        }
+      }
+      setMessage(successMessage)
     }
     setSaving(false)
   }
@@ -62,4 +72,3 @@ export function ProfileSettings() {
     </form>
   )
 }
-

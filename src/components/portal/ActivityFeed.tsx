@@ -29,27 +29,37 @@ export function ActivityFeed({ compact = false }: { compact?: boolean }) {
   const [loading, setLoading] = useState(true)
   const [hasMore, setHasMore] = useState(false)
   const [error, setError] = useState("")
+  const [activityAvailable, setActivityAvailable] = useState(true)
 
   async function load(offset = 0) {
     const response = await fetch(`/api/admin/activity?offset=${offset}`)
-    if (!response.ok) { setError("Activity could not be loaded."); setLoading(false); return }
-    const data = await response.json()
-    setEntries((current) => offset ? [...current, ...data.entries] : data.entries)
-    setHasMore(data.hasMore)
+    const data = await response.json().catch(() => ({})) as { entries?: ActivityLogEntry[]; hasMore?: boolean; activityAvailable?: boolean; error?: string }
+    if (!response.ok) { setError(data.error ? `Activity could not be loaded. ${data.error}` : "Activity could not be loaded."); setLoading(false); return }
+    if (!Array.isArray(data.entries)) { setError("Activity could not be loaded. The service returned an invalid response."); setLoading(false); return }
+    const loadedEntries = data.entries
+    setError("")
+    setEntries((current) => offset ? [...current, ...loadedEntries] : loadedEntries)
+    setHasMore(data.hasMore === true)
+    setActivityAvailable(data.activityAvailable !== false)
     setLoading(false)
   }
 
   useEffect(() => {
+    // load updates React state only after its awaited network response resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void load()
     const channel = supabase.channel("portal-activity")
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "activity_log" }, () => { void load() })
       .subscribe()
     return () => { void supabase.removeChannel(channel) }
+    // The mount-scoped loader and Realtime subscription must not be recreated after state updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const visible = useMemo(() => compact ? entries.slice(0, 6) : entries, [compact, entries])
   if (loading) return <div role="status" className="rounded-[var(--radius-card-lg)] border border-[var(--border)] bg-white p-6 text-sm text-[var(--text-muted)]">Loading activity…</div>
   if (error) return <p role="alert" className="text-sm text-[var(--error)]">{error}</p>
+  if (!activityAvailable) return <EmptyState title="Activity tracking is not enabled yet" description="Apply the activity-log database migration to begin recording team changes." />
   if (!visible.length) return <EmptyState title="No activity yet" description="Speaker, seminar, request, import, and profile changes will appear here." />
 
   return (
@@ -73,4 +83,3 @@ export function ActivityFeed({ compact = false }: { compact?: boolean }) {
     </div>
   )
 }
-

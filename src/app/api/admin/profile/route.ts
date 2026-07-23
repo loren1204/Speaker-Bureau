@@ -15,11 +15,16 @@ export async function PATCH(request: Request) {
       title: cleanText(body.title, 150) || null,
       notifications_enabled: body.notifications_enabled !== false,
     }).eq("id", user.id).select("*").single()
-    if (error) return Response.json({ error: error.message }, { status: 400 })
+    if (error) {
+      const missingPreferences = error.code === "PGRST204" && ["title", "notifications_enabled"].some((column) => error.message.includes(column))
+      return Response.json({
+        error: missingPreferences ? "Team profile preferences are not enabled in the database. Apply the profile-preferences migration." : error.message,
+        code: missingPreferences ? "PROFILE_PREFERENCES_MISSING" : error.code,
+      }, { status: missingPreferences ? 503 : 400 })
+    }
     await recordActivity({ actorUserId: user.id, actionType: "team_profile_updated", entityType: "profile", entityId: user.id, targetLabel: displayName, description: `${profile.full_name || profile.email || "A team member"} updated their team profile.` })
     return Response.json({ profile: data })
   } catch (error) {
     return authErrorResponse(error) ?? Response.json({ error: "Unable to update profile" }, { status: 500 })
   }
 }
-

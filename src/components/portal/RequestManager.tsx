@@ -21,22 +21,35 @@ export function RequestManager() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
-
-  async function load() {
-    const response = await fetch("/api/admin/requests")
-    if (!response.ok) { setError("Requests could not be loaded."); setLoading(false); return }
-    const data = await response.json()
-    setRequests(data.requests)
-    setTeam(data.team)
-    setLoading(false)
-  }
+  const [assignmentSupported, setAssignmentSupported] = useState(false)
 
   useEffect(() => {
-    void load()
+    let active = true
+    async function loadRequests() {
+      try {
+        const response = await fetch("/api/admin/requests")
+        const data = await response.json().catch(() => ({})) as { requests?: SpeakerRequest[]; team?: Pick<TeamProfile, "id" | "full_name" | "email" | "avatar_url">[]; assignmentSupported?: boolean; error?: string }
+        if (!response.ok) throw new Error(data.error || `Request loading failed with HTTP ${response.status}.`)
+        if (!Array.isArray(data.requests) || !Array.isArray(data.team)) throw new Error("The request service returned an invalid response.")
+        if (!active) return
+        setError("")
+        setRequests(data.requests)
+        setTeam(data.team)
+        setAssignmentSupported(data.assignmentSupported === true)
+      } catch (caught) {
+        if (active) setError(`Requests could not be loaded. ${caught instanceof Error ? caught.message : "Please try again."}`)
+      } finally {
+        if (active) setLoading(false)
+      }
+    }
+
+    void loadRequests()
     const channel = supabase.channel("request-manager")
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "speaker_requests" }, () => { void load() })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "speaker_requests" }, () => { void loadRequests() })
       .subscribe()
-    return () => { void supabase.removeChannel(channel) }
+    return () => { active = false; void supabase.removeChannel(channel) }
+    // This effect owns one mount-scoped fetch and Realtime subscription; state values must not resubscribe it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const filtered = useMemo(() => {
@@ -52,10 +65,16 @@ export function RequestManager() {
     if (!selected) return
     setSaving(true)
     setError("")
-    const response = await fetch("/api/admin/requests", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: selected.id, status: selected.status, assigned_user_id: selected.assigned_user_id, notes: selected.notes }) })
-    const result = await response.json()
+    const payload = { id: selected.id, status: selected.status, notes: selected.notes, ...(assignmentSupported ? { assigned_user_id: selected.assigned_user_id } : {}) }
+    const response = await fetch("/api/admin/requests", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) })
+    const result = await response.json() as { request?: SpeakerRequest; assignmentSupported?: boolean; error?: string }
     if (!response.ok) setError(result.error || "Request could not be updated.")
-    else { setRequests((current) => current.map((item) => item.id === result.request.id ? result.request : item)); setSelected(result.request) }
+    else if (result.request) {
+      setRequests((current) => current.map((item) => item.id === result.request?.id ? result.request : item))
+      setSelected(result.request)
+      setAssignmentSupported(result.assignmentSupported !== false)
+      setError("")
+    }
     setSaving(false)
   }
 
@@ -91,7 +110,7 @@ export function RequestManager() {
             {selected.message && <div className="mt-6"><p className="text-xs font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Message</p><p className="mt-2 whitespace-pre-wrap leading-7">{selected.message}</p></div>}
             <div className="mt-8 space-y-5 border-t border-[var(--border)] pt-6">
               <label className="block text-sm font-semibold">Status<select value={selected.status} onChange={(event) => setSelected({ ...selected, status: event.target.value as RequestStatus })} className="mt-2 h-11 w-full rounded-[var(--radius-input)] border border-[var(--border)] bg-white px-3">{statusOptions.filter((item) => item.value !== "all").map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-              <label className="block text-sm font-semibold">Assigned to<select value={selected.assigned_user_id ?? ""} onChange={(event) => setSelected({ ...selected, assigned_user_id: event.target.value || null })} className="mt-2 h-11 w-full rounded-[var(--radius-input)] border border-[var(--border)] bg-white px-3"><option value="">Unassigned</option>{team.map((member) => <option key={member.id} value={member.id}>{member.full_name || member.email}</option>)}</select></label>
+              {assignmentSupported && <label className="block text-sm font-semibold">Assigned to<select value={selected.assigned_user_id ?? ""} onChange={(event) => setSelected({ ...selected, assigned_user_id: event.target.value || null })} className="mt-2 h-11 w-full rounded-[var(--radius-input)] border border-[var(--border)] bg-white px-3"><option value="">Unassigned</option>{team.map((member) => <option key={member.id} value={member.id}>{member.full_name || member.email || "Team member"}</option>)}</select></label>}
               <label className="block text-sm font-semibold">Internal notes<textarea value={selected.notes ?? ""} onChange={(event) => setSelected({ ...selected, notes: event.target.value })} rows={5} className="mt-2 w-full resize-y rounded-[var(--radius-input)] border border-[var(--border)] p-3 leading-6" /></label>
               <button type="button" disabled={saving} onClick={save} className="h-11 w-full rounded-[var(--radius-button)] bg-[var(--green-600)] px-5 text-sm font-bold text-white disabled:opacity-60">{saving ? "Saving…" : "Save changes"}</button>
             </div>
@@ -101,4 +120,3 @@ export function RequestManager() {
     </div>
   )
 }
-

@@ -16,12 +16,14 @@ export async function GET(request: Request) {
       if (error) return Response.json({ error: error.message }, { status: 500 })
       return Response.json({ count: count ?? 0 })
     }
-    const [{ data, error }, profiles] = await Promise.all([
+    const [{ data, error }, profiles, assignmentColumn] = await Promise.all([
       admin.from("speaker_requests").select("*").order("created_at", { ascending: false }).limit(250),
-      admin.from("profiles").select("id, full_name, email, avatar_url").eq("role", "stakeholder").order("full_name"),
+      admin.from("profiles").select("id, full_name").eq("role", "stakeholder").order("full_name"),
+      admin.from("speaker_requests").select("assigned_user_id").limit(0),
     ])
     if (error || profiles.error) return Response.json({ error: error?.message || profiles.error?.message }, { status: 500 })
-    return Response.json({ requests: data ?? [], team: profiles.data ?? [] })
+    const team = (profiles.data ?? []).map((member) => ({ ...member, email: null, avatar_url: null }))
+    return Response.json({ requests: data ?? [], team, assignmentSupported: !assignmentColumn.error })
   } catch (error) {
     return authErrorResponse(error) ?? Response.json({ error: "Unable to load requests" }, { status: 500 })
   }
@@ -36,16 +38,24 @@ export async function PATCH(request: Request) {
     if (!id || !status || !STATUSES.has(status)) return Response.json({ error: "A valid request and status are required" }, { status: 400 })
     const admin = createAdminClient()
     const assignedUserId = cleanText(body.assigned_user_id, 80) || null
-    const { data, error } = await admin.from("speaker_requests").update({
+    const update: { status: RequestStatus; notes: string | null; assigned_user_id?: string | null } = {
       status,
-      assigned_user_id: assignedUserId,
       notes: cleanText(body.notes, 5000) || null,
-    }).eq("id", id).select("*").single()
+    }
+    if (Object.hasOwn(body, "assigned_user_id")) update.assigned_user_id = assignedUserId
+
+    let assignmentSupported = true
+    let updateResult = await admin.from("speaker_requests").update(update).eq("id", id).select("*").single()
+    if (updateResult.error?.code === "PGRST204" && updateResult.error.message.includes("assigned_user_id")) {
+      assignmentSupported = false
+      delete update.assigned_user_id
+      updateResult = await admin.from("speaker_requests").update(update).eq("id", id).select("*").single()
+    }
+    const { data, error } = updateResult
     if (error) return Response.json({ error: error.message }, { status: 400 })
     await recordActivity({ actorUserId: user.id, actionType: "request_status_changed", entityType: "request", entityId: id, targetLabel: data.requester_name, description: `${profile.full_name || profile.email || "A team member"} moved ${data.requester_name}’s request to ${status.replaceAll("_", " ")}.`, metadata: { status } })
-    return Response.json({ request: data })
+    return Response.json({ request: data, assignmentSupported })
   } catch (error) {
     return authErrorResponse(error) ?? Response.json({ error: "Unable to update request" }, { status: 500 })
   }
 }
-
